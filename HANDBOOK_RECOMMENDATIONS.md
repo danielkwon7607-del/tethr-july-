@@ -4,15 +4,19 @@
 
 **1. Confirm Photon/Spectrum as the messaging layer and price in its risks (blocks Build 5).**
 The handbook's iMessage/WhatsApp/SMS-RCS strategy is implementable: Photon's **Spectrum** SDK (`spectrum-ts`, MIT) delivers exactly this — iMessage + WhatsApp + Telegram + automatic SMS/RCS fallback via a managed gRPC stream, no Mac relay, one-line channel addition. This is the intended messaging stack, not a blocker. But three real risks must be recorded in Ch 10/21 before Build 5: Photon is new (~April 2026) and unproven at scale; Apple's ToS on third-party iMessage access is historically aggressive (enforcement risk — need a fallback plan if lines get cut); and the free tier shares numbers, so tethr needs **dedicated Photon lines** for consistent per-founder identity. Voice is a separate vendor (Grok), not Photon.
+**Status: RESOLVED 2026-07-06 (CEO-approved).** Spectrum confirmed; the three risks, the dedicated-lines requirement, and the WhatsApp/SMS-RCS degradation fallback are recorded in §10.2 and Ch 21; the Photon-vs-Grok conflation is corrected in Ch 18/21; Decision Log updated.
 
 **2. Pick the workflow-engine and model-router vendors (blocks Build 0).**
 The handbook decided these by *class* (managed event-driven workflow; provider-agnostic router) but left the vendor open (§25.3). Bootstrap encodes them, so choose them in Build 0 research and record the choice in Ch 18/20 before writing the abstractions.
+**Status: RESOLVED 2026-07-06 (CEO-approved).** Workflow engine: Inngest. Model router: thin in-house router on the Vercel AI SDK's provider adapters. Recorded in §18.3, §20.1, and the Decision Log (Ch 23).
 
 **3. Add a Security & Authorization chapter (blocks Build 5–9).**
 The product holds highly sensitive founder data and takes real actions on a founder's behalf, but the handbook has no authn/authz model, secrets-management, or data-access-control spec. This must exist before any user-facing or send-capable build. New chapter, referenced by §18–22.
+**Status: SCHEDULED 2026-07-06 (CEO-directed).** Engineering drafts the chapter immediately after Build 0; CEO approval required before Build 1 (Decision Log, §25.3).
 
 **4. Specify Founder Model privacy, retention, deletion, and export (blocks Build 4).**
 §6.14 calls the Founder Model "the most sensitive asset in the system" but there is no retention policy, encryption-at-rest requirement, or deletion/export mechanism — and inspectability/correctability (a stated commitment) needs a concrete surface. Data-subject rights (GDPR/CCPA) apply. Specify before the Founder Model is built.
+**Status: SCHEDULED 2026-07-06 (CEO-directed).** Engineering drafts the spec immediately after Build 0, alongside #3; CEO approval required before Build 1 (Decision Log, §25.3).
 
 **5. Define a per-founder cost model and budget guardrails (blocks Build 2/7).**
 An autonomous loop making Tier-2 frontier calls and hitting paid research APIs can be expensive per founder. §20 notes cost but sets no ceiling. Define per-founder token/cost budgets and back-pressure — and note the product tie-in: an overloaded founder (burnout veto) and an over-budget founder should both throttle the loop.
@@ -31,6 +35,7 @@ The calibration constants are explicitly v0 and can only be validated with real 
 
 **10. Add a testing and quality-bar chapter, or cede it explicitly to engineering.**
 The handbook is silent on coverage expectations, e2e scope, and the quality bar, while the engineering DoD leans on TDD. Either add a short quality chapter to the handbook or record a decision that ENGINEERING_OS owns it — so there's one source of truth, not a silent gap.
+**Status: RESOLVED 2026-07-06.** Decision Log entry recorded: ENGINEERING_OS.md owns the quality bar; the handbook stays product-only (Ch 23).
 
 ---
 

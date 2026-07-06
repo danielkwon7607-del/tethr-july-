@@ -668,6 +668,8 @@ Three properties define it:
 
 The founder's channel and cadence preferences are Founder Model reads (family F, §6.3), so which channel and how often are personalization outputs, not global settings.
 
+**Channel vendor (2026-07-06, CEO-approved): Photon's Spectrum SDK** (`spectrum-ts`, MIT) — iMessage + WhatsApp + Telegram with automatic SMS/RCS fallback over a managed gRPC stream, no Mac relay. Three risks are recorded and priced in before anything builds on it: (1) **vendor maturity** — Photon is new (~April 2026) and unproven at scale; (2) **Apple ToS enforcement** — third-party iMessage access is an enforcement risk; the fallback plan is automatic degradation to WhatsApp/SMS-RCS, which the channel-agnostic identity schema (§19.4) already makes a routing change, not a redesign; (3) **dedicated-line cost** — the free tier shares numbers, so consistent per-founder identity requires paid dedicated Photon lines, a real per-founder cost (feeds the cost-model open item). Voice is a separate vendor (Grok, Ch 9), not Photon.
+
 ## 10.3 Delivery, routing, identity
 
 Messaging must route the right message to the right channel for the right founder and keep one coherent thread across channels — a founder who moves from WhatsApp to SMS is still in one conversation with one model behind it. Identity and thread continuity across channels are the core engineering requirements (schemas in Ch 19, channel integrations in Ch 21). Delivery is reliable and ordered; a dropped or duplicated tethr-initiated message erodes the cofounder feel quickly.
@@ -843,8 +845,9 @@ Nothing is built yet; this is the selected stack, not a description of a running
 - **Frontend / app shell:** Next.js 16, TypeScript, Tailwind CSS v4, deployed on Vercel.
 - **Backend / data:** Supabase (PostgreSQL) with pgvector for embeddings.
 - **Model layer:** provider-agnostic routing across tiers (Ch 20).
-- **Durable execution:** a managed event-driven workflow layer, separate from Vercel (§18.3).
-- **Voice:** Photon / Spectrum SDK over WebSocket (Ch 9, Ch 21).
+- **Durable execution:** Inngest — a managed event-driven workflow layer, separate from Vercel (§18.3).
+- **Messaging channels:** Photon Spectrum SDK (`spectrum-ts`) — iMessage/WhatsApp/Telegram with automatic SMS/RCS fallback over a managed gRPC stream (Ch 10, Ch 21).
+- **Voice (fast-follow):** Grok realtime voice (Ch 9, Ch 21). Photon/Spectrum is messaging, not voice; the two were previously conflated.
 - **Email/outreach delivery:** Resend.
 - **Live research sources:** xAI X Search, Serper, Crunchbase (Ch 11, Ch 21).
 - **Observability:** PostHog, Sentry (Ch 22).
@@ -855,7 +858,7 @@ Next.js 16 and Tailwind v4 are current selections; the source's GPT-4o model pin
 
 tethr initiates and runs long-horizon work (Ch 8), so it cannot be a request-scoped app. Vercel functions serve the synchronous surface — app shell, inbound webhooks, API — but the proactive loop, Tier-3 sequences, scheduled memory consolidation, and multi-day follow-up chains need durable background execution that survives the founder closing the app and survives process restarts. This is the primary engineering build-out beyond standard app plumbing.
 
-**Decision:** a dedicated, event-driven durable-workflow layer, separate from the Vercel request path. For an early-stage team, use a managed durable-execution service (Inngest / Trigger.dev class — event triggers, step-level retries, and `sleep until <time>` for day-spanning waits, without hand-rolling cron-plus-state). Temporal is the heavier escape hatch if durability needs outgrow that; it is not the starting choice.
+**Decision:** a dedicated, event-driven durable-workflow layer, separate from the Vercel request path. For an early-stage team, use a managed durable-execution service (Inngest / Trigger.dev class — event triggers, step-level retries, and `sleep until <time>` for day-spanning waits, without hand-rolling cron-plus-state). **Vendor (2026-07-06, CEO-approved): Inngest** — its event-subscription model maps 1:1 to the three trigger intakes below; Trigger.dev (self-hostable, task-invocation model) was the runner-up; lock-in is bounded by the workflow abstraction (interface + one adapter) so a swap is an adapter, not a migration. Temporal is the heavier escape hatch if durability needs outgrow that; it is not the starting choice.
 
 **The proactive loop** is realized as three trigger intakes (§8.2), each firing a durable workflow: inbound events (channel webhooks, founder replies), scheduled scans (a periodic sweep for time/momentum triggers — stalls, idle threads, arriving deadlines), and internal events (verdict landed → plan, plan formed → validation). Execution state lives in the workflow engine; company/founder state lives in Postgres; the two join by ID.
 
@@ -910,7 +913,7 @@ The same phone number across iMessage / SMS / WhatsApp yields distinct `channel_
 
 ## 20.1 Provider-agnostic by construction
 
-Every model call goes through one internal routing abstraction (an adapter over providers — LiteLLM / OpenRouter-style, or a thin in-house router), never direct provider SDK calls scattered through the codebase. Swapping a model is then a config change, not a migration (§1.8). This is non-negotiable: the frontier moves monthly, and pinning is exactly how a build accrues migration debt. The source's **GPT-4o pin is discarded.**
+Every model call goes through one internal routing abstraction — **decided 2026-07-06, CEO-approved: a thin in-house router in `/packages/model-router`, built on the Vercel AI SDK's provider adapters** (TypeScript-native, no extra service, no third-party aggregator in the founder-data path; tiering, cross-provider fallback, and the §20.3 idempotency rule owned in-house) — never direct provider SDK calls scattered through the codebase. Swapping a model is then a config change, not a migration (§1.8). This is non-negotiable: the frontier moves monthly, and pinning is exactly how a build accrues migration debt. The source's **GPT-4o pin is discarded.**
 
 ## 20.2 Tier-to-model (v0 candidates, mid-2026)
 
@@ -924,7 +927,7 @@ Because research already depends on xAI (X Search, Ch 21), Grok 4.x is a natural
 
 ## 20.3 Fallback
 
-Each tier has a primary and a **cross-provider** fallback (e.g. Opus 4.8 → GPT-5.5), so a single provider's outage or rate-limit doesn't halt the loop. The hard rule: an irreversible action (Ch 5) is **never** auto-retried across a fallback without its idempotency key (§18.3) — failover must not cause double-contact. The specific fallback vendors and the router library are a class-decided, vendor-open item (§25.3).
+Each tier has a primary and a **cross-provider** fallback (e.g. Opus 4.8 → GPT-5.5), so a single provider's outage or rate-limit doesn't halt the loop. The hard rule: an irreversible action (Ch 5) is **never** auto-retried across a fallback without its idempotency key (§18.3) — failover must not cause double-contact. The router library is decided (in-house on the Vercel AI SDK, §20.1); the specific per-tier fallback pairings remain config, re-tuned as models move.
 
 ---
 ---
@@ -936,8 +939,8 @@ Each tier has a primary and a **cross-provider** fallback (e.g. Opus 4.8 → GPT
 - **Serper** — web/search-result presence and competitor surface (supporting research signal).
 - **Crunchbase** — funded-competitor and funding-momentum signal (supporting research signal).
 - **Resend** — outbound email delivery for outreach (Ch 14).
-- **Photon / Spectrum SDK** — realtime speech-to-speech and voice cloning over WebSocket (Ch 9); the fast-follow voice stack.
-- **Messaging channels** — iMessage, WhatsApp, SMS/RCS providers (Ch 10); the primary founder-facing surface and the integration set with the hardest identity/continuity requirements (§19.4).
+- **Photon Spectrum SDK** (`spectrum-ts`) — the messaging-channel layer: iMessage, WhatsApp, Telegram, automatic SMS/RCS fallback, over a managed gRPC stream (Ch 10); the primary founder-facing surface and the integration with the hardest identity/continuity requirements (§19.4). Dedicated lines per founder; risks recorded in §10.2.
+- **Grok voice** — realtime speech-to-speech, voice cloning, and calling; the fast-follow voice stack (Ch 9). API surface is an open item to specify before the voice build.
 
 Each research source contributes a *different type* of signal and is synthesized, not averaged (§11.2). Integrations that touch real third parties (Resend sending, messaging channels, voice calling) are the ones bound by the autonomy model (Ch 5).
 
@@ -976,8 +979,13 @@ Canonical decisions to date. Each is binding until amended here; the reasoning i
 - **Durable execution via a managed event-driven workflow layer** (2026-07-06), separate from Vercel's request path; idempotency keys mandatory on all irreversible actions. (§18.3)
 - **Founder Model calibration v0 committed** (2026-07-06): saturating confidence, exponential decay on confidence with per-family half-lives, stated-vs-revealed gate (0.3 / 0.5), multiplicative bounded policy learning, hard burnout veto. The shapes are decisions; the constants are tunable. (§6.15)
 - **Messaging identity is channel-agnostic** (2026-07-06): one founder, many `channel_identities`, one thread. (§19.4)
+- **Durable-execution vendor: Inngest** (2026-07-06, CEO-approved). Its event-subscription model maps 1:1 to the three trigger intakes (§18.3). Rejected: Trigger.dev (task-invocation model; self-hosting not needed yet), Temporal (the designated escape hatch, not the start). Lock-in is bounded by the workflow abstraction — interface + one adapter — so a swap is an adapter, not a migration.
+- **Model router: thin in-house router on the Vercel AI SDK's provider adapters** (2026-07-06, CEO-approved). Keeps the founder-data path free of third-party aggregators and puts tiering, cross-provider fallback, and the §20.3 idempotency rule in-house. Rejected: OpenRouter (per-token margin, a third party in every call), LiteLLM (Python proxy — a second runtime in a TypeScript monorepo). (Ch 20)
+- **Messaging layer confirmed: Photon Spectrum, risks priced in** (2026-07-06, CEO-approved). Three recorded risks — vendor maturity, Apple ToS enforcement, dedicated-line cost — with automatic WhatsApp/SMS-RCS degradation as the fallback (§10.2, §19.4). Voice is Grok, not Photon; the earlier conflation is corrected (Ch 9, Ch 18, Ch 21).
+- **Security & Authorization chapter and Founder Model privacy/retention/deletion/export spec** (2026-07-06, CEO-directed): drafted by engineering immediately after the repository-foundation build, CEO-approved before the data-substrate build, so schemas are designed under those constraints rather than retrofitted.
+- **The engineering quality bar (coverage, e2e scope, TDD) is owned by ENGINEERING_OS.md, not the handbook** (2026-07-06). One source of truth for testing standards; the handbook stays product-only. Resolves Handbook Recommendation #10.
 
-Open decisions carried forward: empirical tuning of the §6.15 calibration constants; the specific workflow service and model-router library (class decided, vendor open); column-level schemas beyond messaging identity (Ch 19); the extensible dimension set as new policies are defined (§6.3).
+Open decisions carried forward: empirical tuning of the §6.15 calibration constants; column-level schemas beyond messaging identity (Ch 19); the extensible dimension set as new policies are defined (§6.3); per-founder cost budgets and back-pressure (before the orchestration build); research-source quotas, caching, and ToS policy (before the research build); the §6.15 instrumentation-and-tuning plan (with the Founder Model build); the irreversible-action approval UX (before the outreach build); the Grok voice API spec (before the voice fast-follow).
 
 ---
 ---
@@ -1139,16 +1147,17 @@ Greenfield: nothing is built yet; the sequence above is the plan. The design-lev
 - Durable background execution → §18.3 (managed event-driven workflow layer, idempotency mandatory).
 - Messaging identity schema → §19.4 (channel-agnostic; concrete).
 - Model re-selection + fallback → Ch 20 (provider-agnostic router, per-tier candidates, cross-provider fallback; GPT-4o discarded).
+- Workflow + router vendors → resolved 2026-07-06: Inngest, and an in-house router on the Vercel AI SDK (§18.3, §20.1, Ch 23).
 
 **Genuinely open, to resolve during build:**
 
 - Empirical tuning of the §6.15 constants against real founder data — they are v0 by definition, and the whole calibration is meant to be measured, not assumed.
-- The specific workflow service (Inngest / Trigger.dev / Temporal) and model-router library — class decided, vendor not.
 - Column-level schemas for the rest of §19 beyond messaging identity.
+- The Security & Authorization chapter and the Founder Model privacy/retention/deletion/export spec — drafting scheduled immediately after the repository-foundation build, CEO approval before the data-substrate build (Ch 23).
 - The extensible dimension list beyond §6.3, added as each new policy that consumes a dimension is defined.
 
 These are the questions the first weeks of building should close; they are the right place for the next design work.
 
 ---
 
-*End of handbook v0.4. All 25 chapters drafted; the v0.3 engineering open items are resolved at design level (§6.15, §18.3, §19.4, Ch 20). Subsequent revision should empirically tune the §6.15 calibration constants, pick the workflow and router vendors, flesh out remaining column-level schemas (Ch 19), and update the Decision Log (Ch 23) as new decisions are made.*
+*End of handbook v0.4. All 25 chapters drafted; the v0.3 engineering open items are resolved at design level (§6.15, §18.3, §19.4, Ch 20), and the workflow/router vendors are chosen (2026-07-06, Ch 23). Subsequent revision should empirically tune the §6.15 calibration constants, add the Security and Founder-Model-privacy chapters, flesh out remaining column-level schemas (Ch 19), and update the Decision Log (Ch 23) as new decisions are made.*
