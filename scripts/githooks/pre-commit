@@ -1,0 +1,7 @@
+#!/bin/sh
+# Versioned pre-commit gate (ENGINEERING_OS §6): typecheck, lint, test.
+# Wired via `npm run prepare` (git config core.hooksPath scripts/githooks).
+set -e
+npm run typecheck
+npm run lint
+npm run test

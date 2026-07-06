@@ -1,0 +1,46 @@
+# CI is the mechanical enforcement of the Definition of Done (ENGINEERING_OS §6, §9).
+# Red CI blocks merge, always. No live provider calls: router and workflow
+# adapters are tested against mocks/fixtures so vendor flakiness can't turn CI red.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      TETHR_ENV: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+
+  deploy-staging:
+    # The trivial vertical slice reaching a staging deploy (Build 0 acceptance).
+    # Requires the Vercel project link: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
+    needs: checks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - run: npx vercel build --token=${{ secrets.VERCEL_TOKEN }}
+      - run: npx vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }}

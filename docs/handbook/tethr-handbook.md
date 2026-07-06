@@ -1141,7 +1141,7 @@ The voice fast-follow (Ch 9) is sequenced against the MVP effort but off the cri
 
 ## 25.3 Current state and open items
 
-Greenfield: nothing is built yet; the sequence above is the plan. The design-level open items flagged in v0.3 are now **resolved at design level**:
+No product capability is built yet; the sequence above is the plan. The engineering foundation exists as of 2026-07-06 (ENGINEERING_OS §7, Build 0): TypeScript monorepo, CI, fail-fast three-environment config, the idempotency+audit substrate, and the workflow (Inngest) and model-router (in-house on the Vercel AI SDK) abstractions with one adapter each — ADRs in `/docs/decisions`. The design-level open items flagged in v0.3 are **resolved at design level**:
 
 - Founder Model calibration → §6.15 (v0 constants committed).
 - Durable background execution → §18.3 (managed event-driven workflow layer, idempotency mandatory).
