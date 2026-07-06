@@ -44,6 +44,7 @@
 
 **Part V — Engineering**
 18. **System Architecture** — ✅
+18.5. **Security & Authorization** — *Who may see what, who may do what, and how is that enforced?* ✅ *(added 2026-07-06; RLS isolation, audit-before-dispatch)*
 19. **Data Model & Schemas** — ✅
 20. **Model Routing** — ✅
 21. **External Integrations & APIs** — ✅
@@ -557,6 +558,26 @@ These are concrete starting values, chosen to be reasonable and internally consi
 
 **Still open:** empirical tuning of every constant above (that's what v0 means), and the extensible dimension set beyond §6.3, added only as a policy consumes each new dimension.
 
+## 6.16 Privacy, retention, deletion, and export
+
+*(Added 2026-07-06, CEO-approved before the data-substrate build, so these constraints are designed into the schemas rather than retrofitted. Enforcement mechanics live in Chapter 18.5; this section defines the founder-facing commitments.)*
+
+The Founder Model is the most sensitive asset in the system (§6.14), and the founder — not tethr — owns it. Four commitments, each with a concrete mechanism:
+
+**Inspectability and correctability (the surface for §6.14).** The founder can see every Trait estimate, its confidence, and the episodes it derives from (provenance, §6.4), and can correct any read in conversation or in the shell. Corrections are the highest-weight signal (§6.5). There is no invisible profile: if a read influences behavior, it is viewable and correctable. This surface ships with the Founder Model build, not after it.
+
+**Retention.** Founder Model data is retained while the founder has an account, because compounding knowledge is the product (§1.7) — there is no silent expiry of memory. Two automatic exceptions: confidence decay (§6.6) already stops stale reads from driving behavior, and raw message bodies held by the messaging substrate follow the same deletion rights below. Retention is bounded by the relationship, not by a timer.
+
+**Deletion — layered, and an explicit exception to invalidate-don't-delete.** Bi-temporal invalidation (§6.4) governs *supersession*; it never overrides a founder's right to erasure. A deletion request (whole account, or a specific fact/episode/dimension) executes on a layered timeline:
+
+1. **Immediately (same interaction):** the target is tombstoned — excluded from all retrieval and policy reads. Behavior changes at once; the model acts as if the data never existed.
+2. **Within 30 days:** hard deletion from every live store — Episodes, Graph, Traits, Policy state, and their embeddings — including *derived* data: a Trait abstracted from deleted episodes is deleted or re-derived without them, and provenance links are followed to completion. Audit rows for irreversible actions already dispatched (§5.4, §18.5.7) are retained with personal content redacted, because the record that an action occurred is a safety obligation, not founder-model content.
+3. **Within 90 days:** the data ages out of encrypted backups by rotation. Backups are never restored without re-applying the deletion ledger.
+
+Account deletion deletes the Founder Model wholesale on the same timeline. Public Knowledge is untouched — it never contained founder data (§7.4).
+
+**Export.** The founder can export their Founder Model and conversation history in a machine-readable format (JSON) at any time: episodes, graph facts, trait estimates with confidence and provenance, and canonical objects. Export is self-serve, complete, and not degraded to discourage leaving — the moat is what the model *does* (§1.8), not data hostage-taking. GDPR/CCPA data-subject rights (access, rectification, erasure, portability) are satisfied by these four mechanisms by construction.
+
 ---
 ---
 
@@ -869,10 +890,80 @@ The Founder Model's **background write path** (§6.5) runs on this layer too: co
 ---
 ---
 
+# Chapter 18.5 — Security & Authorization
+### *Who may see what, who may do what, and how is that enforced rather than intended?*
+
+*(Added 2026-07-06, CEO-approved before the data-substrate build. This chapter closes Handbook Recommendation #3. It is referenced by Ch 18–22 and binds every build from the data substrate onward: these constraints are designed in, not retrofitted.)*
+
+## 18.5.1 Posture
+
+tethr holds the most sensitive picture of a founder any tool ever will (§6.14) and takes irreversible actions on their behalf (§5.3). The security model therefore has two jobs: **isolation** — one founder's data is structurally unreachable from another founder's context — and **authorization** — no real-world action fires without a grant or confirmation, and every action leaves a durable trail. Enforcement lives at the lowest layer that can hold it (database, not application code; Constitution IX): a bug in app code must not be able to violate isolation.
+
+## 18.5.2 Authentication
+
+- **Founders** authenticate to the shell via Supabase Auth (the platform's session/JWT machinery); the authenticated identity maps to exactly one `founders` row.
+- **Inbound messages** authenticate by *verified channel identity* (§19.4): a webhook's `(channel_type, address)` resolves to a `channel_identity` whose `verified_at` is set. Unverified addresses never reach an existing founder's context — they route to onboarding linkage (Ch 3), which performs verification before binding the address to a founder.
+- **Services** (workflow engine, background jobs) authenticate to the database with dedicated credentials per environment (§18.5.5), never with a founder's session.
+- **Webhooks** from channel and research vendors are verified by signature before processing; an unsigned or mis-signed payload is rejected and logged.
+
+## 18.5.3 Authorization model
+
+Three layers, from product to database:
+
+1. **Product layer — autonomy grants (Ch 5).** What tethr may *do* for a founder is governed by the partial-autonomy model: grants per action-class, confirmation as the trigger for everything else, irreversible actions most-guarded. Chapter 5 is the product-level authorization spec; this chapter enforces it downward.
+2. **Application layer — scoped access.** Every read and write in application and workflow code is scoped to a single `founder_id` carried by the request or workflow context. Cross-founder queries do not exist outside explicitly shared, founder-free stores (Public Knowledge, Ch 7).
+3. **Database layer — RLS (§18.5.4).** The layer that makes the first two true even when code is wrong.
+
+## 18.5.4 Row-Level Security is the primary isolation guarantee
+
+**Every founder-scoped table carries a `founder_id` column with an enforced Postgres Row-Level Security policy.** This is the load-bearing rule of the chapter:
+
+- RLS is **enabled and forced** on every founder-scoped table — including for the table owner — so no code path, ORM, or ad-hoc query can read or write another founder's rows once a founder context is set. Application-layer scoping (§18.5.3) is defense-in-depth; **RLS is the floor.**
+- Founder-facing access runs under a database role whose founder context (e.g. the authenticated JWT's founder claim, or an explicit `set_config` in workflow connections) is what the policy checks. **Service-role access that bypasses RLS is the narrow exception, not the norm:** confined to the background write path, migrations, and cross-founder operational jobs — each enumerated, each audited (§18.5.7), never used in request-scoped founder-facing code.
+- Tables that are *not* founder-scoped are the enumerated exceptions: Public Knowledge (shared, founder-free by construction, Ch 7) and infrastructure tables that hold no founder content. A new table is founder-scoped by default; opting out requires a Decision Log entry.
+- **The guarantee is tested, not asserted:** the data substrate ships with tests that set founder A's context and prove founder B's rows are invisible and unwritable, per table. A migration that adds a founder-scoped table without an RLS policy fails review by rule.
+
+## 18.5.5 Secrets and configuration
+
+Secrets (provider API keys, database credentials, webhook signing secrets) live in environment configuration — never in the repository, never in the Founder Model, never in prompts. The boot-time config schema (ENGINEERING_OS §6) validates presence and shape and refuses to start otherwise. The three environments are credential-isolated: staging credentials cannot reach production data, and local uses local stores. Any secret that may have been exposed is rotated immediately (no grace period); vendor keys are scoped to least privilege where the vendor supports it.
+
+## 18.5.6 Data protection
+
+All transport is TLS. All stores encrypt at rest (Supabase-managed), which includes the Founder Model, message bodies, and embeddings — an embedding of founder data is founder data. Logs and error reports (Sentry, Ch 22) are scrubbed of message bodies and Founder Model content; observability sees *that* the system acted, identifiers and metadata, not intimate content. Founder-facing privacy commitments — retention, layered deletion, export — are specified in §6.16 and enforced by this chapter's mechanics.
+
+## 18.5.7 The audit row precedes the dispatch
+
+For every irreversible external action (send, call, spend — §5.3), the ordering is fixed and non-negotiable:
+
+1. **Claim + intent, atomically.** The action's idempotency key is claimed and an audit row recording *intent* (what will be done, for which founder, under which grant or confirmation, with which key) is durably written — one atomic database write, **before** any external dispatch.
+2. **Dispatch**, carrying the idempotency key to the provider.
+3. **Outcome recorded** on the same audit row: executed, failed-definite, or failed-ambiguous.
+
+Three consequences, each deliberate:
+
+- **An action that cannot produce a valid audit row is rejected, not attempted.** If the audit write fails, the dispatch never happens. There is no code path that contacts the world unaudited — a crash after dispatch still leaves the intent row, so the trail can never have a gap where a real-world action occurred.
+- **A retry can never double-fire.** The claim is the idempotency gate: a retry finds the key claimed and does not re-dispatch. **Ambiguous failures never release the claim** — "the provider timed out" does not mean "the message wasn't sent," so the key stays claimed and the action surfaces for reconciliation (degrade-to-asking, §8.5) rather than blind retry. Only a definite not-dispatched failure may release the key for retry.
+- **The audit trail is the founder-legibility substrate (§5.4)** — what tethr did, when, under which authority — and it is retained even through founder-data deletion, with personal content redacted (§6.16), because the record that an action occurred is a safety obligation.
+
+## 18.5.8 Security invariants (summary, binding)
+
+1. Every founder-scoped table has `founder_id` + forced RLS; tested per table. (§18.5.4)
+2. No unverified channel identity reaches an existing founder's context. (§18.5.2)
+3. No secret in the repo, in the model, or in a prompt; boot fails on invalid config. (§18.5.5)
+4. No external irreversible dispatch without a prior, durable intent audit row and claimed idempotency key. (§18.5.7)
+5. Ambiguous dispatch failure never releases an idempotency claim. (§18.5.7)
+6. Service-role (RLS-bypassing) access is enumerated and audited; never request-scoped. (§18.5.4)
+7. Founder data in logs/observability: metadata yes, content no. (§18.5.6)
+
+A change that would violate one of these is load-bearing by definition (Constitution XIII): stop, Confusion Protocol, CEO approval.
+
+---
+---
+
 # Chapter 19 — Data Model & Schemas
 ### *What is stored, and how is it shaped?*
 
-> Storage lives in Supabase/PostgreSQL with pgvector. This chapter fixes the conceptual shape; concrete column-level schemas are to be specified against it and are an open item.
+> Storage lives in Supabase/PostgreSQL with pgvector. This chapter fixes the conceptual shape; concrete column-level schemas are to be specified against it and are an open item. Every schema in this chapter is bound by Chapter 18.5: founder-scoped tables carry `founder_id` with forced RLS (§18.5.4), and deletion follows the §6.16 layered timeline.
 
 ## 19.1 The Founder Model store
 
@@ -983,6 +1074,7 @@ Canonical decisions to date. Each is binding until amended here; the reasoning i
 - **Model router: thin in-house router on the Vercel AI SDK's provider adapters** (2026-07-06, CEO-approved). Keeps the founder-data path free of third-party aggregators and puts tiering, cross-provider fallback, and the §20.3 idempotency rule in-house. Rejected: OpenRouter (per-token margin, a third party in every call), LiteLLM (Python proxy — a second runtime in a TypeScript monorepo). (Ch 20)
 - **Messaging layer confirmed: Photon Spectrum, risks priced in** (2026-07-06, CEO-approved). Three recorded risks — vendor maturity, Apple ToS enforcement, dedicated-line cost — with automatic WhatsApp/SMS-RCS degradation as the fallback (§10.2, §19.4). Voice is Grok, not Photon; the earlier conflation is corrected (Ch 9, Ch 18, Ch 21).
 - **Security & Authorization chapter and Founder Model privacy/retention/deletion/export spec** (2026-07-06, CEO-directed): drafted by engineering immediately after the repository-foundation build, CEO-approved before the data-substrate build, so schemas are designed under those constraints rather than retrofitted.
+- **Chapter 18.5 and §6.16 adopted** (2026-07-06, CEO-approved). Binding constraints for the data substrate onward: (1) **RLS at the database layer is the primary isolation guarantee** — every founder-scoped table carries `founder_id` with a forced, tested RLS policy; app-layer scoping is defense-in-depth only. (2) **The audit row precedes the dispatch** (§18.5.7) — idempotency claim + intent audit row in one atomic write before any irreversible external dispatch; an action that cannot produce a valid audit row is rejected; ambiguous failures never release the claim. (3) **Layered deletion timeline** (§6.16) — immediate tombstone/retrieval exclusion, hard delete from live stores incl. derived data within 30 days, backup age-out within 90; deletion is the explicit exception to invalidate-don't-delete; audit rows survive with content redacted. Alternatives rejected: app-layer-only isolation (a code bug could cross founders), write-behind audit (a crash after dispatch would leave an unaudited real-world action), single-step hard delete (breaks provenance-following and backup reality). Resolves Handbook Recommendations #3 and #4.
 - **The engineering quality bar (coverage, e2e scope, TDD) is owned by ENGINEERING_OS.md, not the handbook** (2026-07-06). One source of truth for testing standards; the handbook stays product-only. Resolves Handbook Recommendation #10.
 
 Open decisions carried forward: empirical tuning of the §6.15 calibration constants; column-level schemas beyond messaging identity (Ch 19); the extensible dimension set as new policies are defined (§6.3); per-founder cost budgets and back-pressure (before the orchestration build); research-source quotas, caching, and ToS policy (before the research build); the §6.15 instrumentation-and-tuning plan (with the Founder Model build); the irreversible-action approval UX (before the outreach build); the Grok voice API spec (before the voice fast-follow).
@@ -1153,11 +1245,11 @@ No product capability is built yet; the sequence above is the plan. The engineer
 
 - Empirical tuning of the §6.15 constants against real founder data — they are v0 by definition, and the whole calibration is meant to be measured, not assumed.
 - Column-level schemas for the rest of §19 beyond messaging identity.
-- The Security & Authorization chapter and the Founder Model privacy/retention/deletion/export spec — drafting scheduled immediately after the repository-foundation build, CEO approval before the data-substrate build (Ch 23).
+- ~~The Security & Authorization chapter and the Founder Model privacy/retention/deletion/export spec~~ — **resolved 2026-07-06**: Chapter 18.5 and §6.16 adopted, CEO-approved before the data-substrate build (Ch 23).
 - The extensible dimension list beyond §6.3, added as each new policy that consumes a dimension is defined.
 
 These are the questions the first weeks of building should close; they are the right place for the next design work.
 
 ---
 
-*End of handbook v0.4. All 25 chapters drafted; the v0.3 engineering open items are resolved at design level (§6.15, §18.3, §19.4, Ch 20), and the workflow/router vendors are chosen (2026-07-06, Ch 23). Subsequent revision should empirically tune the §6.15 calibration constants, add the Security and Founder-Model-privacy chapters, flesh out remaining column-level schemas (Ch 19), and update the Decision Log (Ch 23) as new decisions are made.*
+*End of handbook v0.5. All chapters drafted, including Security & Authorization (Ch 18.5) and Founder Model privacy (§6.16), adopted 2026-07-06 ahead of the data-substrate build. Subsequent revision should empirically tune the §6.15 calibration constants, flesh out remaining column-level schemas (Ch 19), and update the Decision Log (Ch 23) as new decisions are made.*

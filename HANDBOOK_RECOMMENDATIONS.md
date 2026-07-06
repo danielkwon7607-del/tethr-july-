@@ -12,11 +12,11 @@ The handbook decided these by *class* (managed event-driven workflow; provider-a
 
 **3. Add a Security & Authorization chapter (blocks Build 5–9).**
 The product holds highly sensitive founder data and takes real actions on a founder's behalf, but the handbook has no authn/authz model, secrets-management, or data-access-control spec. This must exist before any user-facing or send-capable build. New chapter, referenced by §18–22.
-**Status: SCHEDULED 2026-07-06 (CEO-directed).** Engineering drafts the chapter immediately after Build 0; CEO approval required before Build 1 (Decision Log, §25.3).
+**Status: RESOLVED 2026-07-06 (CEO-approved).** Chapter 18.5 adopted: RLS as the primary isolation guarantee, verified channel identity, secrets/config discipline, and the §18.5.7 audit-before-dispatch rule. Decision Log updated (Ch 23).
 
 **4. Specify Founder Model privacy, retention, deletion, and export (blocks Build 4).**
 §6.14 calls the Founder Model "the most sensitive asset in the system" but there is no retention policy, encryption-at-rest requirement, or deletion/export mechanism — and inspectability/correctability (a stated commitment) needs a concrete surface. Data-subject rights (GDPR/CCPA) apply. Specify before the Founder Model is built.
-**Status: SCHEDULED 2026-07-06 (CEO-directed).** Engineering drafts the spec immediately after Build 0, alongside #3; CEO approval required before Build 1 (Decision Log, §25.3).
+**Status: RESOLVED 2026-07-06 (CEO-approved).** §6.16 adopted: inspect/correct surface, relationship-bounded retention, the layered deletion timeline (immediate tombstone → 30-day hard delete incl. derived data → 90-day backup age-out; audit rows retained content-redacted), and self-serve JSON export. Decision Log updated (Ch 23).
 
 **5. Define a per-founder cost model and budget guardrails (blocks Build 2/7).**
 An autonomous loop making Tier-2 frontier calls and hitting paid research APIs can be expensive per founder. §20 notes cost but sets no ceiling. Define per-founder token/cost budgets and back-pressure — and note the product tie-in: an overloaded founder (burnout veto) and an over-budget founder should both throttle the loop.
