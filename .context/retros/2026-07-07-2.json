@@ -1,0 +1,32 @@
+{
+  "date": "2026-07-07",
+  "window": "1 session (Builds 3 + 4)",
+  "metrics": {
+    "commits": 2,
+    "insertions": 2600,
+    "deletions": 40,
+    "test_count": 95,
+    "tests_added_this_session": 51,
+    "milestones": ["build-3-knowledge", "build-4-founder-model"]
+  },
+  "highlights": [
+    "Build 3: corpus discovered live as rag_corpus (21,349 chunks) — adopted, not ingested; live relevance verified through the production embedder seam the same session",
+    "Ch 7 boundary enforced three ways (deps, imports, raw-SQL scan) after review found the raw-sql bypass",
+    "Build 4: §6.15 shipped exactly as specced, unit-tested against the handbook's own worked examples (3 revealed obs → 0.65)",
+    "trait_observations doubles as evidence ledger and tuning instrumentation; every policy decision recorded incl. veto applications"
+  ],
+  "learnings": [
+    "Adversarial review before tag caught two P1-class issues (raw-SQL boundary bypass; TETHR_DATABASE_URL live-wipe footgun) — the gate earns its cost every single time, even run in-context when subagent quota is exhausted",
+    "Embeddings must never cross-provider fallback: a different model is a different vector space; guard dimension AND model identity at the seam",
+    "Shared-cluster integration suites need own-database isolation plus file serialization; cluster-global objects (roles) still couple them — drop scratch DBs in afterAll",
+    "pgvector test vectors must be constructed non-orthogonal when asserting order; cosine ties are nondeterministic under HNSW",
+    "Env-var naming is a safety surface: the live DSN gets a name the test runner can never mistake for disposable"
+  ],
+  "debt": [
+    "Live vector-index verification pending TETHR_LIVE_DATABASE_URL",
+    "Live Supabase carries a prototype schema that predates our migration chain — baseline decision needed before first deploy",
+    "deploy-staging red (Vercel secrets, CEO-owned) since Build 0",
+    "Write-path extract/abstract model wiring deferred to Build 6 (first real episodes)"
+  ],
+  "next": "Build 5 — Messaging Substrate & Interaction Shell (Photon Spectrum + Next.js shell). See docs/handoffs/build-5-handoff.md."
+}

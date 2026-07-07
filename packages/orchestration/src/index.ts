@@ -1,5 +1,6 @@
 export {
   InMemoryWorkflowEngine,
+  type JsonValue,
   type WorkflowDefinition,
   type WorkflowEngine,
   type WorkflowEvent,

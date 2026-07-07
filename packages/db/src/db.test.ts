@@ -18,7 +18,9 @@ const FOUNDER_SCOPED_TABLES = [
   "graph_entities",
   "graph_edges",
   "traits",
+  "trait_observations",
   "policy_state",
+  "policy_decisions",
   "company_state",
   "verdicts",
   "plans",
@@ -159,7 +161,13 @@ describe.skipIf(!databaseUrl)("data substrate (requires TETHR_DATABASE_URL)", ()
       insert into traits (founder_id, family, dimension, revealed_estimate, revealed_confidence, half_life_weeks, provenance_episode_ids)
       values (${founderA}, 'market_customer', 'customer_contact_avoidance', '0.7', 0.4, 6, ${[episode.id]})`;
     await sql`
+      insert into trait_observations (founder_id, family, dimension, source, observed_estimate, corroborating, provenance_episode_ids)
+      values (${founderA}, 'market_customer', 'customer_contact_avoidance', 'revealed', 0.7, true, ${[episode.id]})`;
+    await sql`
       insert into policy_state (founder_id, behavior) values (${founderA}, 'nudge.hard')`;
+    await sql`
+      insert into policy_decisions (founder_id, behavior, base_fit, confidence_gate, learned_weight, score, decision, veto_applied)
+      values (${founderA}, 'nudge.hard', 0.8, 0.6, 1.0, 0.48, 'act', false)`;
     await sql`
       insert into company_state (founder_id, company_name) values (${founderA}, 'Acme')`;
     const verdict = one(
