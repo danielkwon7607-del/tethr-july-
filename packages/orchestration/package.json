@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tethr/core": "*",
-    "inngest": "^4.11.0"
+    "inngest": "^4.11.0",
+    "@tethr/model-router": "*"
   }
 }

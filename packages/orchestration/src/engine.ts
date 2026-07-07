@@ -60,6 +60,19 @@ export class InMemoryWorkflowEngine implements WorkflowEngine {
     }
   }
 
+  /**
+   * Test affordance: fire a cron-triggered workflow by id, as the scheduler
+   * would. Erroring on an unknown id catches typos that would otherwise be a
+   * workflow that silently never runs.
+   */
+  async fireCron(workflowId: string): Promise<void> {
+    const definition = this.definitions.find(
+      (candidate) => candidate.id === workflowId && "cron" in candidate.trigger,
+    );
+    if (!definition) throw new Error(`no cron workflow registered with id "${workflowId}"`);
+    await definition.handler({ name: `cron:${workflowId}`, data: {} }, this.stepFor(definition.id));
+  }
+
   private stepFor(workflowId: string): WorkflowStep {
     return {
       run: async (name, fn) => {
