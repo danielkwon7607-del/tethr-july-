@@ -2,6 +2,10 @@ import { loadConfig } from "@tethr/core";
 
 // The Build 0 vertical slice: a page that can only render if the process was
 // started with a valid, explicitly scoped environment (fail-fast config).
+// Rendered dynamically so validation runs against the *serving* process's env,
+// not baked in at build time on the CI machine.
+export const dynamic = "force-dynamic";
+
 export default function Home() {
   const config = loadConfig(process.env);
   return (

@@ -96,6 +96,21 @@ describe("InngestWorkflowEngine", () => {
     expect(sent).toEqual([{ name: "onboarding.completed", data: { founderId: "f-1" } }]);
   });
 
+  it("forwards the event dedup id so a retried send cannot re-trigger workflows", async () => {
+    const { client, sent } = stubClient();
+    const engine = new InngestWorkflowEngine(client);
+
+    await engine.send({
+      name: "message.received",
+      data: { founderId: "f-1" },
+      id: "webhook/msg-42",
+    });
+
+    expect(sent).toEqual([
+      { name: "message.received", data: { founderId: "f-1" }, id: "webhook/msg-42" },
+    ]);
+  });
+
   it("accepts a real Inngest client and exposes registered functions for serving", () => {
     const engine = new InngestWorkflowEngine(new Inngest({ id: "tethr-test" }));
     engine.register({

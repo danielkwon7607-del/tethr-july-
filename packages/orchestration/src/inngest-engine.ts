@@ -16,7 +16,7 @@ export type InngestClientLike = {
       };
     }) => Promise<unknown>,
   ): unknown;
-  send(payload: { name: string; data: Record<string, unknown> }): Promise<unknown>;
+  send(payload: { name: string; data: Record<string, unknown>; id?: string }): Promise<unknown>;
 };
 
 /**
@@ -46,6 +46,10 @@ export class InngestWorkflowEngine implements WorkflowEngine {
   }
 
   async send(event: WorkflowEvent): Promise<void> {
-    await this.client.send({ name: event.name, data: event.data });
+    await this.client.send({
+      name: event.name,
+      data: event.data,
+      ...(event.id !== undefined ? { id: event.id } : {}),
+    });
   }
 }

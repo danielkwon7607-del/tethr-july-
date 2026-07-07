@@ -34,7 +34,13 @@ export type CompletionResult = ModelRef & {
 
 export type ModelProvider = {
   id: string;
-  complete(request: { model: string; prompt: string; system?: string }): Promise<{ text: string }>;
+  complete(request: {
+    model: string;
+    prompt: string;
+    system?: string;
+    /** Travels with irreversible requests so downstream dedupe can honor it (§20.3). */
+    idempotencyKey?: string;
+  }): Promise<{ text: string }>;
 };
 
 export class FallbackRefusedError extends Error {
@@ -74,7 +80,7 @@ export class ModelRouter {
     try {
       return await this.call(route.primary, request);
     } catch (primaryError) {
-      if (request.irreversible && request.irreversible.idempotencyKey === undefined) {
+      if (request.irreversible && !request.irreversible.idempotencyKey) {
         throw new FallbackRefusedError(request.tier);
       }
       try {
@@ -92,10 +98,12 @@ export class ModelRouter {
     // Constructor guarantees presence; the non-null keeps the hot path honest.
     const provider = this.providers.get(ref.provider);
     if (!provider) throw new Error(`Unregistered provider "${ref.provider}"`);
+    const idempotencyKey = request.irreversible?.idempotencyKey;
     const { text } = await provider.complete({
       model: ref.model,
       prompt: request.prompt,
       ...(request.system !== undefined ? { system: request.system } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
     return { text, provider: ref.provider, model: ref.model };
   }

@@ -9,10 +9,21 @@ export type WorkflowTrigger = { event: string } | { cron: string };
 export type WorkflowEvent = {
   name: string;
   data: Record<string, unknown>;
+  /**
+   * Dedup id for the event intake: a retried send() with the same id must not
+   * re-trigger workflows (the intake to an idempotent system is itself
+   * idempotent, §18.5.7). Inngest dedupes on it natively.
+   */
+  id?: string;
 };
 
 export type WorkflowStep = {
-  /** A durable, memoized unit of work: retried runs skip completed steps. */
+  /**
+   * A durable, memoized unit of work: retried runs skip completed steps.
+   * Return values must be JSON-serializable — durable engines memoize by
+   * JSON round-trip, so a Date/Map/class instance survives the first run and
+   * silently corrupts on replay.
+   */
   run<T>(name: string, fn: () => Promise<T>): Promise<T>;
   /** Day-spanning waits without hand-rolled cron-plus-state (§18.3). */
   sleepUntil(name: string, until: Date): Promise<void>;

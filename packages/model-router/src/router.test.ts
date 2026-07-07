@@ -4,13 +4,16 @@ import { FallbackRefusedError, type ModelProvider, ModelRouter } from "./router"
 function stubProvider(
   id: string,
   behavior: (model: string) => Promise<{ text: string }>,
-): ModelProvider & { calls: string[] } {
+): ModelProvider & { calls: string[]; keys: (string | undefined)[] } {
   const calls: string[] = [];
+  const keys: (string | undefined)[] = [];
   return {
     id,
     calls,
-    complete: async ({ model }) => {
+    keys,
+    complete: async ({ model, idempotencyKey }) => {
       calls.push(model);
+      keys.push(idempotencyKey);
       return behavior(model);
     },
   };
@@ -79,6 +82,40 @@ describe("ModelRouter", () => {
     });
 
     expect(result.provider).toBe("openai");
+  });
+
+  it("refuses failover when the idempotency key is an empty string (§20.3)", async () => {
+    const anthropic = stubProvider("anthropic", async () => {
+      throw new Error("outage");
+    });
+    const openai = stubProvider("openai", async () => ({ text: "must not run" }));
+    const router = new ModelRouter({ providers: [anthropic, openai], routes });
+
+    await expect(
+      router.complete({
+        tier: "tier2",
+        prompt: "draft outreach",
+        irreversible: { idempotencyKey: "" },
+      }),
+    ).rejects.toBeInstanceOf(FallbackRefusedError);
+    expect(openai.calls).toHaveLength(0);
+  });
+
+  it("transmits the idempotency key to the provider, on primary and on failover", async () => {
+    const anthropic = stubProvider("anthropic", async () => {
+      throw new Error("outage");
+    });
+    const openai = stubProvider("openai", async () => ({ text: "fallback ok" }));
+    const router = new ModelRouter({ providers: [anthropic, openai], routes });
+
+    await router.complete({
+      tier: "tier2",
+      prompt: "draft outreach",
+      irreversible: { idempotencyKey: "founder-1/send-42" },
+    });
+
+    expect(anthropic.keys).toEqual(["founder-1/send-42"]);
+    expect(openai.keys).toEqual(["founder-1/send-42"]);
   });
 
   it("fails fast at construction when a route names an unregistered provider", () => {

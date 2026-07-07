@@ -1,11 +1,10 @@
 export { type AppEnv, type Config, loadConfig } from "./config";
 export {
-  type AuditEntry,
-  type AuditLog,
-  type AuditStatus,
-  type IdempotencyStore,
-  InMemoryAuditLog,
-  InMemoryIdempotencyStore,
+  type ActionLedger,
+  type ActionRecord,
+  type ActionStatus,
+  DefiniteDispatchFailureError,
+  InMemoryActionLedger,
   type IrreversibleResult,
   type RunIrreversibleOptions,
   runIrreversible,
