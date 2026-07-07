@@ -27,7 +27,8 @@ checks + an access-boundary test.
 
 ## Open debt (do not silently absorb)
 
-- Vercel "staging" deploy job actually targets the preview environment (ops decision needed).
+- **CI's `deploy-staging` job is red on every push since Build 0** — the repo has no `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` secrets. Only the CEO can provision the Vercel project and add them. The `checks` job (the correctness gate) is green throughout. Do not "fix" this by skipping the job silently — it is the Build 0 staging-deploy acceptance criterion, awaiting credentials.
+- Vercel "staging" deploy job actually targets the preview environment (ops decision needed, same conversation as the secrets).
 - Reconciliation-event id needs an incident nonce once a reconciler that *releases* claims exists (`external-action.ts` comment).
 - Live Inngest dev-server e2e deferred to the first deployed environment.
 - Per-founder cost budgets (Handbook Recommendation #5) still open — bites at Build 7, worth drafting sooner.
