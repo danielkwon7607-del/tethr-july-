@@ -6,9 +6,23 @@
 
 export type WorkflowTrigger = { event: string } | { cron: string };
 
+/**
+ * What may cross a durable boundary: durable engines memoize step results and
+ * event payloads by JSON round-trip, so a Date/Map/class instance survives the
+ * first run and silently corrupts on replay. The constraint makes that a
+ * compile error instead of a production surprise.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 export type WorkflowEvent = {
   name: string;
-  data: Record<string, unknown>;
+  data: Record<string, JsonValue>;
   /**
    * Dedup id for the event intake: a retried send() with the same id must not
    * re-trigger workflows (the intake to an idempotent system is itself
@@ -20,11 +34,11 @@ export type WorkflowEvent = {
 export type WorkflowStep = {
   /**
    * A durable, memoized unit of work: retried runs skip completed steps.
-   * Return values must be JSON-serializable — durable engines memoize by
-   * JSON round-trip, so a Date/Map/class instance survives the first run and
-   * silently corrupts on replay.
+   * `void` is admitted for fire-and-forget steps (Inngest memoizes it as
+   * null, which is harmless when the result is ignored).
    */
-  run<T>(name: string, fn: () => Promise<T>): Promise<T>;
+  // biome-ignore lint/suspicious/noConfusingVoidType: fire-and-forget closures return Promise<void>, which `undefined` would not admit
+  run<T extends JsonValue | void>(name: string, fn: () => Promise<T>): Promise<T>;
   /** Day-spanning waits without hand-rolled cron-plus-state (§18.3). */
   sleepUntil(name: string, until: Date): Promise<void>;
 };
@@ -46,6 +60,7 @@ export type WorkflowEngine = {
  */
 export class InMemoryWorkflowEngine implements WorkflowEngine {
   private readonly definitions: WorkflowDefinition[] = [];
+  private readonly seenEventIds = new Set<string>();
   readonly stepLog: string[] = [];
 
   register(definition: WorkflowDefinition): void {
@@ -53,6 +68,12 @@ export class InMemoryWorkflowEngine implements WorkflowEngine {
   }
 
   async send(event: WorkflowEvent): Promise<void> {
+    // Model Inngest's event-id dedup so exactly-once claims that rest on it
+    // are actually exercised by tests.
+    if (event.id !== undefined) {
+      if (this.seenEventIds.has(event.id)) return;
+      this.seenEventIds.add(event.id);
+    }
     for (const definition of this.definitions) {
       if ("event" in definition.trigger && definition.trigger.event === event.name) {
         await definition.handler(event, this.stepFor(definition.id));

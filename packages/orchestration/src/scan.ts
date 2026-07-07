@@ -9,8 +9,12 @@ import type { WorkflowEngine, WorkflowEvent } from "./engine";
 export type ScheduledScanOptions = {
   id: string;
   cron: string;
-  /** Detect triggers; returns the internal events to emit (may be empty). */
-  sweep: () => Promise<WorkflowEvent[]>;
+  /**
+   * Detect triggers; returns the internal events to emit (may be empty).
+   * The dedup id is mandatory: a crash between emission and checkpoint makes
+   * the emit step at-least-once, and the id is what collapses it to once.
+   */
+  sweep: () => Promise<(WorkflowEvent & { id: string })[]>;
 };
 
 export function registerScheduledScan(engine: WorkflowEngine, options: ScheduledScanOptions): void {
@@ -21,9 +25,10 @@ export function registerScheduledScan(engine: WorkflowEngine, options: Scheduled
     handler: async (_event, step) => {
       const detected = await step.run("sweep", sweep);
       for (const event of detected) {
+        if (!event.id) throw new Error(`scan "${id}" produced an event without a dedup id`);
         // One durable step per emission: a crash mid-loop re-emits only the
-        // events not yet sent, and each carries a dedup id.
-        await step.run(`emit:${event.name}:${event.id ?? "unkeyed"}`, () => engine.send(event));
+        // events not yet checkpointed, deduped downstream by their id.
+        await step.run(`emit:${event.name}:${event.id}`, () => engine.send(event));
       }
     },
   });

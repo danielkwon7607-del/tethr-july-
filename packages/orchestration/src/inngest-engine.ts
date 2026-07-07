@@ -1,4 +1,4 @@
-import type { WorkflowDefinition, WorkflowEngine, WorkflowEvent } from "./engine";
+import type { JsonValue, WorkflowDefinition, WorkflowEngine, WorkflowEvent } from "./engine";
 
 /**
  * The narrow slice of the Inngest client this adapter touches, so tests can
@@ -35,7 +35,9 @@ export class InngestWorkflowEngine implements WorkflowEngine {
         { id: definition.id, triggers: [definition.trigger] },
         ({ event, step }) =>
           definition.handler(
-            { name: event.name, data: event.data },
+            // Inngest event payloads went through its JSON transport, so the
+            // narrowing to JsonValue reflects what actually arrived.
+            { name: event.name, data: event.data as Record<string, JsonValue> },
             {
               run: (name, fn) => step.run(name, fn),
               sleepUntil: (name, until) => step.sleepUntil(name, until),

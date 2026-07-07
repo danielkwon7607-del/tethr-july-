@@ -66,13 +66,14 @@ describe("runExternalAction (§18.5.7 wrapper)", () => {
         idempotencyKey: "founder-1/send-2",
         dispatch: async () => {
           dispatched += 1;
+          return "sent";
         },
       }),
     ).rejects.toThrow("ledger unavailable");
     expect(dispatched).toBe(0);
   });
 
-  it("cannot double-fire under retry: a re-run after ambiguous failure re-dispatches nothing and asks instead", async () => {
+  it("an ambiguous dispatch surfaces for reconciliation immediately and cannot double-fire or double-ask under retry", async () => {
     const { engine, ledger, asks } = harness();
     let dispatched = 0;
     const attempt = () =>
@@ -88,17 +89,46 @@ describe("runExternalAction (§18.5.7 wrapper)", () => {
         },
       });
 
-    await expect(attempt()).rejects.toThrow("timeout");
-    // The durable engine retries the workflow: same key, second invocation.
-    const retry = await attempt();
-
-    expect(dispatched).toBe(1);
-    expect(retry.outcome).toBe("needs-reconciliation");
+    // Ambiguity is a value, not a thrown error: the workflow does not depend
+    // on the engine's step-retry budget to eventually surface the ask.
+    const first = await attempt();
+    expect(first.outcome).toBe("needs-reconciliation");
     expect(asks).toHaveLength(1);
     expect(asks[0]).toMatchObject({
       actionType: "outreach.send",
       idempotencyKey: "founder-1/send-3",
     });
+
+    // The event is redelivered as a fresh run: no re-dispatch, no second ask
+    // (the reconciliation event id dedupes).
+    const redelivered = await attempt();
+    expect(redelivered.outcome).toBe("needs-reconciliation");
+    expect(dispatched).toBe(1);
+    expect(asks).toHaveLength(1);
+  });
+
+  it("a crash-orphaned pending claim surfaces for reconciliation, never as a silent duplicate", async () => {
+    const { engine, ledger, asks } = harness();
+    // A previous process wrote the intent row, then died mid-dispatch: the
+    // claim is stuck 'pending' and nobody knows if the world was contacted.
+    await ledger.claimIntent("outreach.send", "founder-1/send-6");
+
+    let dispatched = 0;
+    const result = await runExternalAction({
+      step: directStep,
+      ledger,
+      engine,
+      actionType: "outreach.send",
+      idempotencyKey: "founder-1/send-6",
+      dispatch: async () => {
+        dispatched += 1;
+        return "sent";
+      },
+    });
+
+    expect(dispatched).toBe(0);
+    expect(result).toEqual({ outcome: "needs-reconciliation", priorStatus: "pending" });
+    expect(asks).toHaveLength(1);
   });
 
   it("a definite dispatch failure releases the claim so a deliberate retry executes", async () => {

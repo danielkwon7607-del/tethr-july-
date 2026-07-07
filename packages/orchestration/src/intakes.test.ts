@@ -60,7 +60,11 @@ describe("trigger intakes", () => {
       id: "scan.momentum",
       cron: "0 * * * *",
       sweep: async () => [
-        { name: "momentum.stall-detected", data: { founderId: "f-1", actionId: "a-1" } },
+        {
+          name: "momentum.stall-detected",
+          data: { founderId: "f-1", actionId: "a-1" },
+          id: "stall:a-1:2026-07-07",
+        },
       ],
     });
 
