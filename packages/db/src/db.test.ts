@@ -31,7 +31,9 @@ const FOUNDER_SCOPED_TABLES = [
 ] as const;
 
 // §18.5.4: a table is founder-scoped by default; opting out is enumerated.
-const RLS_EXCEPTIONS = ["public_knowledge_chunks", "schema_migrations"] as const;
+// rag_corpus is Public Knowledge (Ch 7): shared, founder-free, read-only —
+// deliberately the opposite of every founder-scoped table (no RLS, no writes).
+const RLS_EXCEPTIONS = ["rag_corpus", "schema_migrations"] as const;
 
 const embedding = (hot: number) =>
   JSON.stringify(Array.from({ length: 1536 }, (_, i) => (i === hot ? 1 : 0)));
@@ -80,8 +82,10 @@ describe.skipIf(!databaseUrl)("data substrate (requires TETHR_DATABASE_URL)", ()
       ).map((row) => row.relname);
 
     expect(await tables()).toEqual(
-      expect.arrayContaining([...FOUNDER_SCOPED_TABLES, "founders", "public_knowledge_chunks"]),
+      expect.arrayContaining([...FOUNDER_SCOPED_TABLES, "founders", "rag_corpus"]),
     );
+    // 0007 supersedes the 0003 store: one Public Knowledge table, not two.
+    expect(await tables()).not.toContain("public_knowledge_chunks");
 
     const reverted = await migrateDown(sql, applied.length);
     expect(reverted).toEqual([...applied].reverse());
@@ -302,25 +306,38 @@ describe.skipIf(!databaseUrl)("data substrate (requires TETHR_DATABASE_URL)", ()
 
   it("pgvector retrieval returns nearest chunks on seeded data (Ch 7 grounding path)", async () => {
     await asService();
-    await sql`insert into public_knowledge_chunks (source, title, content, embedding) values
-      ('pg-essays', 'Do things that don''t scale', 'Recruit users manually...', ${embedding(0)}),
-      ('steve-blank', 'Get out of the building', 'No facts inside the building...', ${embedding(500)}),
-      ('first-round', 'Founder-led sales', 'The founder sells first...', ${embedding(1)})`;
+    await sql`insert into rag_corpus (source, url, title, content, chunk_index, metadata, embedding) values
+      ('pg-essays', 'https://paulgraham.com/ds.html', 'Do things that don''t scale', 'Recruit users manually...', 0, '{"topic":"growth"}', ${embedding(0)}),
+      ('steve-blank', null, 'Get out of the building', 'No facts inside the building...', 0, '{}', ${embedding(500)}),
+      ('first-round', null, 'Founder-led sales', 'The founder sells first...', 0, '{}',
+        ${JSON.stringify(Array.from({ length: 1536 }, (_, i) => (i <= 1 ? 1 : 0)))})`;
 
     // Grounding retrieval runs as the app role: readable, never writable.
     await asApp(founderA);
     const nearest = await sql<{ title: string }[]>`
-      select title from public_knowledge_chunks
+      select title from rag_corpus
       order by embedding <=> ${embedding(0)} limit 2`;
     expect(nearest.map((row) => row.title)).toEqual([
       "Do things that don't scale",
       "Founder-led sales",
     ]);
     await expect(
-      sql`insert into public_knowledge_chunks (source, content, embedding)
+      sql`insert into rag_corpus (source, content, embedding)
           values ('x', 'y', ${embedding(2)})`,
     ).rejects.toThrow(/permission denied/);
     await asService();
+  });
+
+  it("rag_corpus embeddings are vector(1536) — the text-embedding-3-small dimension guard", async () => {
+    // A mismatched embedding model would produce a different dimension; the
+    // column type is the structural guard, and this pins it (Ch 7, Build 3).
+    const [dim] = await sql<{ dim: number }[]>`
+      select atttypmod as dim from pg_attribute
+      where attrelid = 'rag_corpus'::regclass and attname = 'embedding'`;
+    expect(dim?.dim).toBe(1536);
+    await expect(
+      sql`select embedding <=> ${JSON.stringify([1, 0, 0])} from rag_corpus limit 1`,
+    ).rejects.toThrow(/dimensions/);
   });
 
   describe("PgActionLedger (§18.5.7 against real Postgres)", () => {

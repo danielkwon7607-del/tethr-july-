@@ -1,4 +1,10 @@
-export { aiSdkProvider } from "./ai-sdk-provider";
+export { aiSdkEmbeddingProvider, aiSdkProvider } from "./ai-sdk-provider";
+export {
+  createQueryEmbedder,
+  EmbeddingDimensionError,
+  type EmbeddingProvider,
+  type QueryEmbedder,
+} from "./embeddings";
 export {
   type CompletionRequest,
   type CompletionResult,

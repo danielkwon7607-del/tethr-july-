@@ -1,4 +1,5 @@
-import { generateText, type LanguageModel } from "ai";
+import { type EmbeddingModel, embed, generateText, type LanguageModel } from "ai";
+import type { EmbeddingProvider } from "./embeddings";
 import type { ModelProvider } from "./router";
 
 // The one place a provider SDK is touched (handbook §20.1). The factory maps a
@@ -17,6 +18,20 @@ export function aiSdkProvider(
         ...(system !== undefined ? { system } : {}),
       });
       return { text: result.text };
+    },
+  };
+}
+
+// Same factory shape for embeddings (e.g. openai.textEmbedding("text-embedding-3-small")).
+export function aiSdkEmbeddingProvider(
+  id: string,
+  resolveModel: (model: string) => EmbeddingModel,
+): EmbeddingProvider {
+  return {
+    id,
+    async embed({ model, text }) {
+      const result = await embed({ model: resolveModel(model), value: text });
+      return { embedding: result.embedding };
     },
   };
 }
