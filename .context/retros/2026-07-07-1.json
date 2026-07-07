@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-07",
+  "window": "Builds 1+2 session (2026-07-06 → 07)",
+  "metrics": {
+    "commits": 6,
+    "tags": ["build-1-data", "build-2-orchestration"],
+    "tests_total": 58,
+    "tests_added_this_session": 36,
+    "review_p1s_fixed": 5
+  },
+  "highlights": [
+    "Handbook Ch 18.5 + §6.16 adopted before schema code (gate honored)",
+    "packages/db: full Ch 19 schema, forced per-table-tested RLS, §18.5.7 ledger, proven against real Postgres+pgvector locally and in CI",
+    "packages/orchestration: three intakes, tier routing, external-action wrapper with audit-before-dispatch + degrade-to-asking, restart-survival proven against the memoization contract"
+  ],
+  "learnings": [
+    "Fresh-context adversarial review caught P1s in all three passes that structured checklist review missed (Build 0: release-on-ambiguous; Build 1: withFounderContext superuser bypass; Build 2: pending-claim swallow). Make it a standing gate.",
+    "Never judge a command by piped tail output — `npm run typecheck | tail` masked a failing workspace for half the session; check exit codes.",
+    "'pending' and 'ambiguous' ledger states are epistemically identical after a crash: both mean 'the world may have been contacted'. Reconciliation must treat them the same.",
+    "Make ambiguity a step VALUE not a thrown error, so surfacing doesn't depend on retry budgets.",
+    "Homebrew postgresql@17 postinstall can fail (unlinked lib/share); manual symlinks + scratch-cluster receipt recorded in packages/db/README.md."
+  ],
+  "debt": [
+    "Vercel 'staging' deploy job targets preview env (needs an ops decision)",
+    "FK-check RLS existence oracle (accepted, Ch 23)",
+    "Reconciliation event id needs an incident nonce once a reconciler that releases claims exists (comment in external-action.ts)",
+    "Live Inngest dev-server e2e deferred to first deployed environment"
+  ],
+  "next": "Build 3 — Public Knowledge corpus & grounding (see docs/handoffs/build-3-handoff.md)"
+}
