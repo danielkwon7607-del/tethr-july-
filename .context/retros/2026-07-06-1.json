@@ -1,0 +1,24 @@
+{
+  "date": "2026-07-06",
+  "window": "1d (retroactive Build 0 + gate session)",
+  "metrics": {
+    "commits": 5,
+    "contributors": 2,
+    "insertions": 9270,
+    "deletions": 74,
+    "test_count": 28,
+    "tests_added_this_session": 6,
+    "active_days": 1
+  },
+  "highlights": [
+    "Build 0 foundation shipped and tagged (build-0-foundation)",
+    "Handbook Ch 18.5 + §6.16 adopted before any schema code (63b0849)",
+    "3 P1 review findings fixed: ambiguous-failure claim release, write-behind audit, untransmitted idempotency key (0fe0d7e)"
+  ],
+  "learnings": [
+    "Invariants were enforced at the happy path; tests pinned the statement, not the failure mode. Fresh-context adversarial review caught what structured review missed.",
+    "Write failure-mode tests first for safety-bearing code: timeout-after-send, crash-between-steps, replay serialization.",
+    "Tracked debt: Vercel 'staging' deploy actually targets preview env; pre-commit validates worktree not index; step.run JSON-serialization is a doc-comment constraint, not a type constraint."
+  ],
+  "next": "Build 1 — data & memory substrate (packages/db, reversible migrations, RLS per §18.5.4, pgvector), then Build 2 — orchestration."
+}

@@ -13,6 +13,23 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TETHR_ENV: local
+      TETHR_DATABASE_URL: postgres://tethr:tethr@localhost:54329/tethr_test
+    services:
+      # Real Postgres + pgvector for the @tethr/db integration suite —
+      # migrations, RLS, and retrieval are proven, not mocked (§18.5.4).
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: tethr
+          POSTGRES_PASSWORD: tethr
+          POSTGRES_DB: tethr_test
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U tethr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
