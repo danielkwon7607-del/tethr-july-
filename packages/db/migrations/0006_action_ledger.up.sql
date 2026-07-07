@@ -21,12 +21,14 @@ create table action_ledger (
   resolved_at timestamptz
 );
 
--- The claim (§18.5.7): at most one non-failed row per (action_type, key).
+-- The claim (§18.5.7): at most one non-failed row per founder + action + key.
 -- A definite failure ('failed') drops out of the index, releasing the claim
 -- for retry while the failed row remains as history; 'pending', 'executed',
 -- and 'ambiguous' all hold the claim — ambiguous never releases (§18.5.7).
+-- founder_id is part of the claim so idempotency keys are a per-founder
+-- namespace: one founder's live claim can never block (or reveal) another's.
 create unique index action_ledger_claim
-  on action_ledger (action_type, idempotency_key)
+  on action_ledger (founder_id, action_type, idempotency_key)
   where status <> 'failed';
 create index action_ledger_founder on action_ledger (founder_id, created_at desc);
 

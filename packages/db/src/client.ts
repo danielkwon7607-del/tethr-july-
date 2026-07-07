@@ -19,9 +19,13 @@ export function createDbClient(databaseUrl: string, options?: { max?: number }):
 }
 
 /**
- * Scope a unit of work to one founder: a transaction with app.founder_id set
- * locally, which is what every RLS policy checks (§18.5.4). The setting is
- * transaction-local, so pooled connections cannot leak founder context.
+ * Scope a unit of work to one founder: a transaction that assumes the
+ * non-superuser tethr_app role AND sets app.founder_id, which is what every
+ * RLS policy checks (§18.5.4). SET LOCAL ROLE is load-bearing: a superuser or
+ * table-owner connection bypasses RLS unconditionally (FORCE or not), so
+ * founder-scoped work must drop privileges — the isolation guarantee cannot
+ * depend on the DSN happening to name a low-privilege role. Both the role and
+ * the setting are transaction-local, so pooled connections cannot leak either.
  */
 export async function withFounderContext<T>(
   sql: Sql,
@@ -29,6 +33,7 @@ export async function withFounderContext<T>(
   work: (trx: Sql) => Promise<T>,
 ): Promise<T> {
   return (await sql.begin(async (trx) => {
+    await trx`set local role tethr_app`;
     await trx`select set_config('app.founder_id', ${founderId}, true)`;
     return work(trx as unknown as Sql);
   })) as T;

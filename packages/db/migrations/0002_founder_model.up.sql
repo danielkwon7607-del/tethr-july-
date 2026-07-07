@@ -67,6 +67,9 @@ grant select, insert, update, delete on graph_entities to tethr_app;
 create table graph_edges (
   id uuid primary key default gen_random_uuid(),
   founder_id uuid not null default current_founder_id() references founders(id) on delete cascade,
+  -- Known Postgres limitation: FK checks run unfiltered by RLS, so a valid
+  -- foreign UUID confirms existence across founders. Mitigated by UUID
+  -- unguessability; recorded as accepted debt in the Decision Log (Ch 23).
   source_entity_id uuid not null references graph_entities(id) on delete cascade,
   target_entity_id uuid not null references graph_entities(id) on delete cascade,
   relation text not null,

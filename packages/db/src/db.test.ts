@@ -225,16 +225,35 @@ describe.skipIf(!databaseUrl)("data substrate (requires TETHR_DATABASE_URL)", ()
     await asService();
   });
 
-  it("withFounderContext scopes founder identity to the transaction and does not leak", async () => {
-    await sql`set role tethr_app`;
-    const seen = await withFounderContext(sql, founderA, async (trx) => {
-      const rows = await trx`select id from episodes`;
-      return rows.length;
+  it("withFounderContext drops privileges and scopes identity to the transaction — even on a superuser connection", async () => {
+    // The connection under test is the superuser; the helper itself must make
+    // RLS bite (SET LOCAL ROLE), not rely on the DSN being low-privilege.
+    await asService();
+    const seenAsA = await withFounderContext(sql, founderA, async (trx) => {
+      return (await trx`select id from episodes`).length;
     });
-    expect(seen).toBeGreaterThan(0);
-    const [after] = await sql<{ ctx: string | null }[]>`
-      select current_setting('app.founder_id', true) as ctx`;
+    expect(seenAsA).toBeGreaterThan(0);
+
+    const seenAsB = await withFounderContext(sql, founderB, async (trx) => {
+      return (await trx`select id from episodes`).length;
+    });
+    expect(seenAsB).toBe(0);
+
+    // Neither the role nor the context leaks past the transaction.
+    const [after] = await sql<{ ctx: string | null; usr: string }[]>`
+      select current_setting('app.founder_id', true) as ctx, current_user as usr`;
     expect(after?.ctx ?? "").toBe("");
+    expect(after?.usr).not.toBe("tethr_app");
+  });
+
+  it("a malformed founder context is a clean deny, not an error on every query", async () => {
+    await sql`set role tethr_app`;
+    await sql`select set_config('app.founder_id', 'not-a-uuid', false)`;
+    const rows = await sql`select id from episodes`;
+    expect(rows.length).toBe(0);
+    await expect(
+      sql`insert into episodes (kind, content) values ('message', '{}')`,
+    ).rejects.toThrow();
     await asService();
   });
 
@@ -312,6 +331,15 @@ describe.skipIf(!databaseUrl)("data substrate (requires TETHR_DATABASE_URL)", ()
       expect(await ledger.claimIntent("outreach.send", "founder-a/send-1")).toBe("claimed");
       expect(await ledger.claimIntent("outreach.send", "founder-a/send-1")).toBe("pending");
       expect(await ledger.claimIntent("voice.call", "founder-a/send-1")).toBe("claimed");
+      await asService();
+    });
+
+    it("idempotency keys are a per-founder namespace: one founder's claim never blocks another's", async () => {
+      const ledger = new PgActionLedger(sql);
+      await asApp(founderA);
+      expect(await ledger.claimIntent("outreach.send", "shared-key-1")).toBe("claimed");
+      await asApp(founderB);
+      expect(await ledger.claimIntent("outreach.send", "shared-key-1")).toBe("claimed");
       await asService();
     });
 

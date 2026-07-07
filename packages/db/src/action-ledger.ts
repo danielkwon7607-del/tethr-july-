@@ -18,7 +18,7 @@ export class PgActionLedger implements ActionLedger {
       const inserted = await this.sql<{ status: ActionStatus }[]>`
         insert into action_ledger (action_type, idempotency_key)
         values (${actionType}, ${idempotencyKey})
-        on conflict (action_type, idempotency_key) where status <> 'failed' do nothing
+        on conflict (founder_id, action_type, idempotency_key) where status <> 'failed' do nothing
         returning status`;
       if (inserted.length > 0) return "claimed";
       const existing = await this.sql<{ status: ActionStatus }[]>`

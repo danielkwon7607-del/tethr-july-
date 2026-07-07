@@ -6,11 +6,18 @@
 
 create extension if not exists vector;
 
--- The founder context of the current connection. Empty/unset yields NULL, so
--- a connection without context can neither read nor write founder data.
+-- The founder context of the current connection. Empty/unset — and any
+-- malformed value — yields NULL, so a connection without a valid context can
+-- neither read nor write founder data: fail-closed as a clean deny, not an
+-- error on every query.
 create function current_founder_id() returns uuid
-language sql stable
-as $$ select nullif(current_setting('app.founder_id', true), '')::uuid $$;
+language plpgsql stable
+as $$
+begin
+  return nullif(current_setting('app.founder_id', true), '')::uuid;
+exception when invalid_text_representation then
+  return null;
+end $$;
 
 -- Non-superuser application role (NOLOGIN; assumed via SET ROLE or as the
 -- connection role in managed environments). Cluster-level: created once,
