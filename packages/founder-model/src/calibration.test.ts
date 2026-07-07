@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   applyBurnoutVeto,
   BURNOUT_VETO,
-  classifyObservation,
   confidenceFromEvidence,
   decayedConfidence,
   decidePolicy,
