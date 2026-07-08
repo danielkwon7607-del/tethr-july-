@@ -33,10 +33,15 @@ export async function retrieveFounderContext(
     /** Optional relation filter for the graph read. */
     relation?: string;
     episodeLimit?: number;
+    /** Caps the graph read; defaults to DEFAULT_FACT_LIMIT in liveFacts. */
+    factLimit?: number;
   } = {},
 ): Promise<FounderContext> {
   const [facts, traits, episodes] = await Promise.all([
-    liveFacts(sql, options.relation ? { relation: options.relation } : undefined),
+    liveFacts(sql, {
+      ...(options.relation ? { relation: options.relation } : {}),
+      ...(options.factLimit !== undefined ? { limit: options.factLimit } : {}),
+    }),
     listTraits(sql),
     options.query
       ? semanticEpisodes(sql, options.query, options.episodeLimit)

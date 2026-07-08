@@ -31,6 +31,8 @@ export type WireFact = {
   source: WireEntity;
   relation: string;
   target: WireEntity;
+  /** Relation cardinality (ADR 0008); defaults to 'one' in assertFact. */
+  cardinality?: "one" | "many";
   attributes?: { [key: string]: JsonValue };
   provenanceEpisodeIds?: string[];
 };
@@ -63,6 +65,25 @@ export function registerFounderModelWritePath(engine: WorkflowEngine, deps: Writ
       if (!episode.episodeId || !episode.founderId) {
         throw new Error(`${EPISODE_LOGGED_EVENT} requires episodeId and founderId`);
       }
+
+      // §18.5: the event payload's founderId is untrusted input — it decides
+      // the RLS scope every write below runs under. Prove it owns the episode
+      // before anything else: under the claimed founder's scope, RLS makes a
+      // foreign (or tombstoned, §6.16) episode invisible.
+      await step.run("verify-episode", async () => {
+        const visible = await deps.runScoped(
+          episode.founderId,
+          (trx) => trx<{ id: string }[]>`
+            select id from episodes
+            where id = ${episode.episodeId} and tombstoned_at is null`,
+        );
+        if (visible.length === 0) {
+          throw new Error(
+            `episode ${episode.episodeId} does not belong to founder ${episode.founderId}`,
+          );
+        }
+        return true;
+      });
 
       // Extract → Graph: superseded facts are invalidated, never deleted.
       const facts = await step.run("extract", () => deps.extract(episode));

@@ -1,6 +1,7 @@
 import { migrateUp, withFounderContext } from "@tethr/db";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { assertFact, liveFacts } from "./graph-store";
 import { decideAndRecord, reweightPolicy } from "./policy-store";
 import {
   applyCorrection,
@@ -165,6 +166,120 @@ describe.skipIf(!adminUrl)("founder-model stores (requires TETHR_DATABASE_URL)",
         select learned_weight from policy_state where behavior = 'nudge.hard'`,
     );
     expect(row?.learned_weight).toBeCloseTo(1.15 * 0.85, 5);
+  });
+
+  it("a multi-valued relation keeps facts side by side; identical re-assertion extends provenance", async () => {
+    const ada = { entityType: "founder", name: "Ada" };
+    const first = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "works_with",
+        target: { entityType: "person", name: "Alice" },
+        cardinality: "many",
+        provenanceEpisodeIds: [episodes[0] as string],
+      }),
+    );
+    const second = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "works_with",
+        target: { entityType: "person", name: "Bob" },
+        cardinality: "many",
+      }),
+    );
+    // Bob does not supersede Alice — both facts are simultaneously true.
+    expect(second.superseded).toEqual([]);
+    const live = await asFounder((trx) => liveFacts(trx, { relation: "works_with" }));
+    expect(live).toHaveLength(2);
+
+    // Identical re-assertion extends provenance instead of duplicating.
+    const again = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "works_with",
+        target: { entityType: "person", name: "Alice" },
+        cardinality: "many",
+        provenanceEpisodeIds: [episodes[1] as string],
+      }),
+    );
+    expect(again.id).toBe(first.id);
+    const after = await asFounder((trx) => liveFacts(trx, { relation: "works_with" }));
+    expect(after).toHaveLength(2);
+    const alice = after.find((fact) => fact.target.name === "Alice");
+    expect(alice?.provenanceEpisodeIds).toEqual(expect.arrayContaining([episodes[0], episodes[1]]));
+  });
+
+  it("a single-valued assertion supersedes every live edge for its (source, relation)", async () => {
+    const ada = { entityType: "founder", name: "Ada" };
+    // "works_with" currently has two live edges (Alice, Bob). A cardinality
+    // 'one' assertion means "the state is now exactly this" — both go.
+    const carol = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "works_with",
+        target: { entityType: "person", name: "Carol" },
+      }),
+    );
+    expect(carol.superseded).toHaveLength(2);
+    const live = await asFounder((trx) => liveFacts(trx, { relation: "works_with" }));
+    expect(live).toHaveLength(1);
+    expect(live[0]?.target.name).toBe("Carol");
+  });
+
+  it("entity matching ignores case and surrounding whitespace — representation noise is not a pivot", async () => {
+    const ada = { entityType: "founder", name: "Ada" };
+    const first = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "pursues",
+        target: { entityType: "idea", name: "AI Bookkeeping" },
+      }),
+    );
+    const noisy = await asFounder((trx) =>
+      assertFact(trx, {
+        source: ada,
+        relation: "pursues",
+        target: { entityType: "idea", name: "  ai bookkeeping " },
+      }),
+    );
+    // Same real-world entity: provenance-extend, never a false supersession.
+    expect(noisy.id).toBe(first.id);
+    expect(noisy.superseded).toEqual([]);
+    const live = await asFounder((trx) => liveFacts(trx, { relation: "pursues" }));
+    expect(live).toHaveLength(1);
+    expect(live[0]?.target.name).toBe("AI Bookkeeping");
+  });
+
+  it("the database itself rejects a second live single-valued edge — concurrent asserts fail loudly", async () => {
+    const ids = await asFounder(
+      (trx) => trx<{ id: string; name: string }[]>`
+        select id, name from graph_entities where name in ('Ada', 'Carol')`,
+    );
+    const ada = ids.find((row) => row.name === "Ada")?.id;
+    const carol = ids.find((row) => row.name === "Carol")?.id;
+    await expect(
+      asFounder(
+        (trx) => trx`
+          insert into graph_edges (source_entity_id, target_entity_id, relation, valid_from, cardinality)
+          values (${ada as string}, ${carol as string}, 'works_with', now(), 'one')`,
+      ),
+    ).rejects.toThrow(/duplicate key/);
+  });
+
+  it("liveFacts caps its read at the requested limit, newest first", async () => {
+    const ada = { entityType: "founder", name: "Ada" };
+    for (let i = 0; i < 5; i++) {
+      await asFounder((trx) =>
+        assertFact(trx, {
+          source: ada,
+          relation: "mentions",
+          target: { entityType: "topic", name: `topic-${i}` },
+          cardinality: "many",
+        }),
+      );
+    }
+    const capped = await asFounder((trx) => liveFacts(trx, { relation: "mentions", limit: 3 }));
+    expect(capped).toHaveLength(3);
   });
 
   it("the burnout veto measurably caps intervention and is instrumented (§6.15)", async () => {

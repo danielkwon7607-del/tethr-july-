@@ -103,8 +103,10 @@ describe.skipIf(!adminUrl)(
         data: { founderId: founder, episodeId },
       });
 
-      // All four §6.5 stages ran as durable, memoized steps.
+      // All four §6.5 stages ran as durable, memoized steps — after the
+      // §18.5 ownership check pinned the event's founderId to the episode.
       expect(engine.stepLog).toEqual([
+        `${WRITE_PATH_WORKFLOW_ID}:verify-episode`,
         `${WRITE_PATH_WORKFLOW_ID}:extract`,
         `${WRITE_PATH_WORKFLOW_ID}:write-graph`,
         `${WRITE_PATH_WORKFLOW_ID}:abstract`,
@@ -141,6 +143,37 @@ describe.skipIf(!adminUrl)(
         where dimension = 'customer_contact_avoidance'`,
       );
       expect(count?.n).toBe(4);
+    });
+
+    it("refuses to write under a founder who does not own the episode (§18.5)", async () => {
+      const [mallory] = await sql<{ id: string }[]>`
+        insert into founders (display_name) values ('Mallory') returning id`;
+      const malloryId = (mallory as { id: string }).id;
+      const engine = new InMemoryWorkflowEngine();
+      registerFounderModelWritePath(engine, {
+        runScoped: (founderId, work) => withFounderContext(sql, founderId, work),
+        extract: async () => [
+          {
+            source: { entityType: "founder", name: "Mallory" },
+            relation: "pursues",
+            target: { entityType: "idea", name: "stolen context" },
+          },
+        ],
+        abstract: async () => [],
+      });
+
+      // The event claims Mallory's identity over Ada's episode: the claimed
+      // founder's RLS scope cannot see the episode, so the write path refuses.
+      await expect(
+        engine.send({
+          name: EPISODE_LOGGED_EVENT,
+          data: { founderId: malloryId, episodeId },
+        }),
+      ).rejects.toThrow(/does not belong/);
+
+      // Nothing was written under the claimed founder.
+      const written = await withFounderContext(sql, malloryId, (trx) => liveFacts(trx));
+      expect(written).toHaveLength(0);
     });
 
     it("a superseded graph fact is invalidated, not deleted (§6.4)", async () => {
