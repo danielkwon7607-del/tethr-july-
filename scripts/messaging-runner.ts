@@ -7,6 +7,7 @@ import {
   loadMessagingConfig,
   registerDeliveryScan,
   registerInitiation,
+  registerResponseLearning,
   type SpectrumApp,
   type SpectrumPlatformHandle,
   spectrumChannelPort,
@@ -52,12 +53,19 @@ async function main(): Promise<void> {
 
   const engine = new InngestWorkflowEngine(new Inngest({ id: "tethr" }));
   registerDeliveryScan(engine, { serviceSql: sql });
+  // §6.9: a founder reply credits the initiation it answered, so the policy
+  // learns what lands (delivery is not efficacy). Pure DB work — no model.
+  registerResponseLearning(engine, { runScoped });
   registerInitiation(engine, {
     runScoped,
     port,
     actionThreshold: Number(process.env.TETHR_ACTION_THRESHOLD ?? "0.3"),
-    // ponytail: template compose; Tier-2 generation through the tier runner
-    // lands with Build 6's model wiring (with the write-path extractors).
+    // Build 6 shipped Tier-2 `createInitiationCompose(tierRunner)` and the
+    // model-backed write-path extractors `createModelExtractors(...)`, both
+    // tested against fakes. Wiring a LIVE ModelRouter here needs a concrete AI
+    // SDK provider binding (@ai-sdk/*) + keys and can only be exercised on a
+    // deployed line — it joins the deploy-staging production-placement item
+    // (ADR 0009). Until then the runner keeps the template compose.
     compose: async ({ behavior }) =>
       behavior === "nudge.hard"
         ? "You said customer calls were this week's priority — want me to line two up for tomorrow?"

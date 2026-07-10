@@ -70,15 +70,18 @@ one test.
 
 - `deploy-staging` red since Build 0 (Vercel secrets, CEO). The messaging
   runner's production placement joins that conversation (ADR 0009).
-- **G2/G3 blocked on the live DB password**: `TETHR_LIVE_DATABASE_URL` in
-  `apps/web/.env` fails auth. The direct host `db.<ref>.supabase.co` is
-  IPv6-only (unreachable from this machine); the working IPv4 path is the
-  session pooler `aws-1-us-east-1.pooler.supabase.com:5432` with user
-  `postgres.<ref>` — tenant found there, password rejected (tested raw and
-  URL-decoded). User must reset the DB password and update the DSN. Then:
-  run `verify-build-3.ts` (SQL index check) and do the prototype-schema
-  quarantine (`legacy_` renames; ADR + Decision Log; beware live prototype
-  tables named `messages`/`outreach` colliding with our chain).
+- **G2/G3 — RESOLVED 2026-07-09 (ADR 0010).** Password reset; DSN corrected to
+  the IPv4 session pooler (`aws-1-us-east-1.pooler.supabase.com:5432`, user
+  `postgres.<ref>`; the direct host is IPv6-only). **G2:** `verify-build-3.ts`
+  green on the full SQL path (index present + used + relevant); no index to
+  create. **G3:** live inventory showed our chain was never applied to live —
+  only `rag_corpus` is ours; the other 18 tables (incl. `founders`/`messages`)
+  were prototype and are now `legacy_`-prefixed (reversible; `rag_corpus`
+  untouched). Remaining: the first-deploy migration-baseline step must resolve
+  unprefixed constraint/index names (`founders_pkey`-class), tracked in ADR 0010.
+  Run scripts through the esbuild receipt (`--external:postgres`, NOT
+  `--packages=external` — that externalizes the workspace `@tethr/*` symlinks
+  and Node then chokes on their extensionless TS imports).
 - Photon dedicated line not yet provisioned (Business plan,
   app.photon.codes) — blocks real-wire tests only. On a real line, verify:
   agent-echo filtering (`sender.kind`), delivery receipts

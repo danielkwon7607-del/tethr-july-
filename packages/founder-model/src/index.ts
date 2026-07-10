@@ -28,6 +28,7 @@ export {
   liveFacts,
   upsertEntity,
 } from "./graph-store";
+export { createModelExtractors, type ModelExtractorDeps } from "./model-extractors";
 export { decideAndRecord, learnedWeight, reweightPolicy } from "./policy-store";
 export {
   type EpisodeHit,

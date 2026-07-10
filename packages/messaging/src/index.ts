@@ -4,6 +4,7 @@ export {
   type SendRequest,
   type SendResult,
 } from "./channel-port";
+export { createInitiationCompose } from "./compose";
 export { loadMessagingConfig, type MessagingConfig } from "./config";
 export { DELIVERY_SCAN_ID, registerDeliveryScan } from "./delivery";
 export { type EnvelopedContent, envelopeInbound, renderEnvelope } from "./envelope";
@@ -27,6 +28,11 @@ export {
   type SendOutcome,
   sendFounderMessage,
 } from "./outbound";
+export {
+  RESPONSE_LEARNING_WORKFLOW_ID,
+  type ResponseLearningDeps,
+  registerResponseLearning,
+} from "./response-learning";
 export {
   type CadenceParser,
   type CadenceSignal,

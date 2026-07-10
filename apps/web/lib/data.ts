@@ -4,9 +4,12 @@ import { type ThreadMessage, threadFor } from "@tethr/messaging";
 
 // Server-only data access for the shell (Ch 4): every read runs under the
 // founder's RLS scope — the shell is a window onto founder-scoped rows, not
-// a privileged view. Founder binding: Supabase Auth session → founder claim
-// arrives with onboarding (Build 6, §18.5.2); until then the shell binds to
-// an explicit TETHR_DEV_FOUNDER_ID and refuses to run without one.
+// a privileged view. Founder binding: onboarding now links the founder to a
+// Supabase Auth user (founders.auth_user_id) and `founderIdForAuthUser`
+// (@tethr/onboarding) resolves session → founder. The remaining swap here is
+// the Next.js session read (@supabase/ssr cookie plumbing), tracked to the
+// deploy-staging/auth item; until it lands the shell binds an explicit
+// TETHR_DEV_FOUNDER_ID and refuses to run without one.
 
 let client: Sql | null = null;
 const db = (): Sql => {
