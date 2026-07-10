@@ -32,7 +32,9 @@ export type SelfReport = {
 
 export type OnboardingInput = {
   path: EntryPath;
-  /** The founder's own channel, verified through onboarding (§18.5.2). */
+  /** The founder's own channel. Created UNVERIFIED (§18.5.2): onboarding proves
+   * no address ownership, so verified_at is set only once the entry boundary's
+   * verification step (OTP / proven inbound) hands over proof — see ADR 0011. */
   channel: { channelType: ChannelType; address: string };
   /** Supabase Auth user id (§18.5.2) — links the founder to their session so
    * the shell resolves founder from the JWT claim instead of a dev binding. */
