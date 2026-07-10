@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Sql } from "postgres";
 
@@ -8,7 +8,10 @@ import type { Sql } from "postgres";
 // its own transaction. Plain SQL because the schema IS the spec — RLS
 // policies, triggers, and constraints read off the file (Constitution IX).
 
-export const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations", import.meta.url));
+// join/dirname rather than `new URL("../migrations", import.meta.url)`:
+// bundlers (Next/webpack) statically rewrite that exact pattern into an
+// asset reference, which breaks when this package is transpiled into an app.
+export const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
 const ensureMigrationsTable = (sql: Sql) =>
   sql`create table if not exists schema_migrations (

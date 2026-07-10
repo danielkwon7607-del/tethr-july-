@@ -1,0 +1,255 @@
+/* tethr shell — deliberately thin (Ch 4): the anchors, nothing else.
+   Editorial-minimal: one serif for identity, system sans for the working
+   surface, one warm accent, hierarchy from scale not chrome. */
+
+:root {
+  --color-surface: oklch(98.5% 0.004 85);
+  --color-panel: oklch(96.5% 0.006 85);
+  --color-ink: oklch(22% 0.01 60);
+  --color-muted: oklch(48% 0.015 60);
+  --color-line: oklch(88% 0.008 85);
+  --color-accent: oklch(58% 0.16 45);
+  --color-good: oklch(56% 0.13 150);
+  --color-hold: oklch(60% 0.12 85);
+
+  --font-display: ui-serif, "Iowan Old Style", Georgia, serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.25rem;
+  --text-hero: clamp(1.75rem, 1.2rem + 1.8vw, 2.5rem);
+
+  --space-1: 0.375rem;
+  --space-2: 0.75rem;
+  --space-3: 1.25rem;
+  --space-4: 2rem;
+  --space-5: 3.5rem;
+
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+
+.shell {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-3) var(--space-5);
+}
+
+.shell-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+  margin-bottom: var(--space-4);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+
+.shell-nav {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.shell-nav a {
+  color: var(--color-muted);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid transparent;
+  padding-bottom: 2px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.shell-nav a:hover,
+.shell-nav a:focus-visible {
+  color: var(--color-ink);
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-hero);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: var(--space-1);
+}
+
+.kicker {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--space-2);
+}
+
+.lede {
+  color: var(--color-muted);
+  margin-bottom: var(--space-4);
+}
+
+section + section {
+  margin-top: var(--space-4);
+}
+
+h2 {
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin-bottom: var(--space-2);
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.panel + .panel {
+  margin-top: var(--space-2);
+}
+
+.empty {
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-3);
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+
+dl.facts dt {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+dl.facts dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  display: inline-block;
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  padding: 1px 8px;
+  border-radius: 99px;
+  border: 1px solid var(--color-line);
+  color: var(--color-muted);
+}
+
+.badge.act {
+  color: var(--color-good);
+  border-color: color-mix(in oklch, var(--color-good) 40%, transparent);
+}
+
+.badge.hold {
+  color: var(--color-hold);
+  border-color: color-mix(in oklch, var(--color-hold) 40%, transparent);
+}
+
+ol.plan-list {
+  list-style: none;
+  padding: 0;
+  counter-reset: step;
+}
+
+ol.plan-list > li {
+  counter-increment: step;
+  position: relative;
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+}
+
+ol.plan-list > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.thread {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.thread li {
+  max-width: 85%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.thread li.in {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  align-self: flex-start;
+}
+
+.thread li.out {
+  background: color-mix(in oklch, var(--color-accent) 12%, var(--color-surface));
+  align-self: flex-end;
+}
+
+table.traits {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+table.traits th {
+  text-align: left;
+  color: var(--color-muted);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+table.traits td {
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
+  border-bottom: 1px solid var(--color-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  margin-top: var(--space-2);
+}
