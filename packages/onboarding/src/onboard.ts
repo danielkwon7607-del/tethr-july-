@@ -10,7 +10,7 @@ import { sendInternal, type WorkflowEngine } from "@tethr/orchestration";
 import type { Sql } from "postgres";
 import { founderIdForAuthUser } from "./auth";
 import { companyStateSeed, type OnboardingInput, seedProfile } from "./entry-paths";
-import { ONBOARDING_COMPLETED_EVENT } from "./research-trigger";
+import { ONBOARDING_COMPLETED_EVENT } from "./events";
 
 // The onboarding orchestrator (§3): create the founder, seed Company State and
 // the cold-start Founder Model, then auto-trigger Research (§3.4). It is the

@@ -8,10 +8,5 @@ export {
   seedProfile,
   type TraitSeed,
 } from "./entry-paths";
+export { ONBOARDING_COMPLETED_EVENT } from "./events";
 export { type OnboardingDeps, type OnboardingResult, runOnboarding } from "./onboard";
-export {
-  ONBOARDING_COMPLETED_EVENT,
-  RESEARCH_ENTRY_WORKFLOW_ID,
-  type ResearchEntryDeps,
-  registerResearchEntryStub,
-} from "./research-trigger";

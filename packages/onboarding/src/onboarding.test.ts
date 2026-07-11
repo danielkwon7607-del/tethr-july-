@@ -13,8 +13,8 @@ import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { founderIdForAuthUser } from "./auth";
 import type { OnboardingInput } from "./entry-paths";
+import { ONBOARDING_COMPLETED_EVENT } from "./events";
 import { runOnboarding } from "./onboard";
-import { registerResearchEntryStub } from "./research-trigger";
 
 // Build 6 end-to-end (§3, §6.13): onboarding seeds the cold-start model at low
 // confidence, auto-triggers Research with no founder prompt, and the very
@@ -80,31 +80,27 @@ describe.skipIf(!adminUrl)("onboarding & seeding (requires TETHR_DATABASE_URL)",
     }
   });
 
-  it("auto-triggers Research on completion, with no founder prompt (§3.4)", async () => {
+  it("emits onboarding.completed to auto-trigger Research, with no founder prompt (§3.4)", async () => {
+    // Onboarding's job at the handoff is to EMIT the event; the Research
+    // pipeline (a separate owner, @tethr/research) consumes it and advances the
+    // stage. Here we assert the producer side — the founder never asked.
     const engine = new InMemoryWorkflowEngine();
     const triggered: string[] = [];
-    registerResearchEntryStub(engine, {
-      runScoped,
-      onTriggered: (data) => {
-        triggered.push(data.founderId as string);
+    engine.register({
+      id: "test.research-listener",
+      trigger: { event: ONBOARDING_COMPLETED_EVENT },
+      handler: async (event) => {
+        triggered.push(event.data.founderId as string);
       },
     });
 
     const { founderId } = await runOnboarding({ sql, engine }, input("problem", "+1002"));
 
-    // The trigger fired as a side effect of onboarding — the founder never asked.
     expect(triggered).toEqual([founderId]);
-    // §3.4: onboarding ends with tethr already at work — stage advanced.
-    const [state] = await runScoped(
-      founderId,
-      (trx) => trx<{ stage: string }[]>`select stage from company_state`,
-    );
-    expect(state?.stage).toBe("researching");
   });
 
   it("first proactive contact reflects the seeds but stays conservative under low confidence", async () => {
     const engine = new InMemoryWorkflowEngine();
-    registerResearchEntryStub(engine, { runScoped });
     const channel = createMemoryChannel();
     registerInitiation(engine, {
       runScoped,
