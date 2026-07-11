@@ -7,8 +7,14 @@ import { registerDeliveryScan } from "./delivery";
 import { resolveInbound } from "./identity";
 import { INITIATION_TRIGGER_EVENT, registerInitiation } from "./initiation";
 import { createMemoryChannel } from "./memory-channel";
+import { createVerificationChallenge, sendVerificationCode, verifyChannelOtp } from "./otp";
 import { sendFounderMessage } from "./outbound";
-import { handleInbound, INBOUND_MESSAGE_EVENT, UNRECOGNIZED_INBOUND_EVENT } from "./runtime";
+import {
+  handleInbound,
+  INBOUND_MESSAGE_EVENT,
+  UNRECOGNIZED_INBOUND_EVENT,
+  UNRECOGNIZED_REPLY_ACTION,
+} from "./runtime";
 import { threadFor } from "./thread";
 
 // Build 5 acceptance (ENGINEERING_OS §7, design doc 2026-07-07) against real
@@ -186,7 +192,11 @@ describe.skipIf(!adminUrl)("messaging substrate (requires TETHR_DATABASE_URL)", 
     expect(episodes?.n).toBe(2);
   });
 
-  it("unverified and unknown addresses never reach a founder's context (§18.5.2)", async () => {
+  it("unverified attempts OTP (no unrecognized event); only unknown senders are unrecognized (§18.5.2, Ch 10)", async () => {
+    // Gate 0 corrects the Build 5 conflation: "unrecognized" now means a sender
+    // with NO matching channel_identity (kind: unknown). A known-but-unverified
+    // channel is an OTP-reply candidate — it attempts verification and drops,
+    // never emitting the unrecognized event. Neither reaches a founder (§18.5.2).
     const engine = new InMemoryWorkflowEngine();
     const unrecognized: { channelType: string; addressHash: string }[] = [];
     engine.register({
@@ -206,10 +216,10 @@ describe.skipIf(!adminUrl)("messaging substrate (requires TETHR_DATABASE_URL)", 
     });
 
     await handleInbound(
-      { sql, engine, runScoped },
+      { sql, engine, runScoped }, // no otp/port wired: unverified simply drops
       {
         channelType: "imessage",
-        address: ZOE_PHONE, // exists but unverified
+        address: ZOE_PHONE, // exists but unverified — an OTP-reply candidate
         body: "pretend I'm Zoe",
         platformMessageId: "pm-zoe-1",
         timestamp: new Date(),
@@ -219,19 +229,162 @@ describe.skipIf(!adminUrl)("messaging substrate (requires TETHR_DATABASE_URL)", 
       { sql, engine, runScoped },
       {
         channelType: "sms",
-        address: UNKNOWN_PHONE,
+        address: UNKNOWN_PHONE, // no channel_identity: the real unrecognized case
         body: "total stranger",
         platformMessageId: "pm-x-1",
         timestamp: new Date(),
       },
     );
 
-    expect(unrecognized).toHaveLength(2);
+    // Only the unknown sender is unrecognized; Zoe's unverified inbound is not.
+    expect(unrecognized).toHaveLength(1);
+    expect(unrecognized[0]?.channelType).toBe("sms");
     const [zoeMessages] = await asFounder(
       zoe,
       (trx) => trx<{ n: number }[]>`select count(*)::int as n from messages`,
     );
     expect(zoeMessages?.n).toBe(0);
+  });
+
+  it("a channel cannot be verified without a matching OTP reply; a matching reply verifies it (Ch 3)", async () => {
+    // Gate 0 core acceptance. A dedicated founder so shared Zoe stays unverified.
+    const secret = "int-test-pepper";
+    const VAL_PHONE = "+15551230010";
+    const [val] = await sql<{ id: string }[]>`
+      insert into founders (display_name) values ('Val') returning id`;
+    const valId = (val as { id: string }).id;
+    const [identity] = await sql<{ id: string }[]>`
+      insert into channel_identities (founder_id, channel_type, address, verified_at, is_primary)
+      values (${valId}, 'imessage', ${VAL_PHONE}, null, true) returning id`;
+    const channelIdentityId = (identity as { id: string }).id;
+
+    // A live challenge, created under the founder's scope as onboarding would.
+    const { code, challenge } = createVerificationChallenge({ secret }, channelIdentityId);
+    await withFounderContext(
+      sql,
+      valId,
+      (trx) => trx`
+        insert into channel_verifications (channel_identity_id, code_hash, expires_at)
+        values (${challenge.channelIdentityId}, ${challenge.codeHash}, ${challenge.expiresAt})`,
+    );
+
+    // A WRONG code does not verify — verified_at stays null, still unverified.
+    const wrongCode = code === "000000" ? "000001" : "000000";
+    const wrong = await verifyChannelOtp(
+      sql,
+      { channelType: "imessage", address: VAL_PHONE, channelIdentityId, code: wrongCode },
+      { secret },
+    );
+    expect(wrong.verified).toBe(false);
+    const [beforeRow] = await sql<{ verified_at: Date | null }[]>`
+      select verified_at from channel_identities where id = ${channelIdentityId}`;
+    expect(beforeRow?.verified_at).toBeNull();
+    expect((await resolveInbound(sql, { channelType: "imessage", address: VAL_PHONE })).kind).toBe(
+      "unverified",
+    );
+
+    // The MATCHING code verifies and atomically stamps verified_at.
+    const ok = await verifyChannelOtp(
+      sql,
+      { channelType: "imessage", address: VAL_PHONE, channelIdentityId, code },
+      { secret },
+    );
+    expect(ok.verified).toBe(true);
+    expect(ok.founderId).toBe(valId);
+    const [afterRow] = await sql<{ verified_at: Date | null }[]>`
+      select verified_at from channel_identities where id = ${channelIdentityId}`;
+    expect(afterRow?.verified_at).not.toBeNull();
+    // The channel now resolves as a founder channel (§18.5.2).
+    expect((await resolveInbound(sql, { channelType: "imessage", address: VAL_PHONE })).kind).toBe(
+      "founder",
+    );
+  });
+
+  it("sending the code is one audited, idempotent outbound to the unverified channel (§18.5.7)", async () => {
+    const WES_PHONE = "+15551230011";
+    const [wes] = await sql<{ id: string }[]>`
+      insert into founders (display_name) values ('Wes') returning id`;
+    const wesId = (wes as { id: string }).id;
+    const [identity] = await sql<{ id: string }[]>`
+      insert into channel_identities (founder_id, channel_type, address, verified_at, is_primary)
+      values (${wesId}, 'imessage', ${WES_PHONE}, null, true) returning id`;
+    const channelIdentityId = (identity as { id: string }).id;
+    const memory = createMemoryChannel();
+
+    const first = await sendVerificationCode(
+      { port: memory.port, runScoped },
+      {
+        founderId: wesId,
+        channelIdentityId,
+        channelType: "imessage",
+        address: WES_PHONE,
+        code: "424242",
+      },
+    );
+    expect(first.outcome).toBe("executed");
+    expect(memory.sent).toHaveLength(1);
+    expect(memory.sent[0]?.text).toContain("424242");
+    expect(memory.sent[0]?.address).toBe(WES_PHONE);
+    const [audit] = await asFounder(
+      wesId,
+      (trx) => trx<{ n: number }[]>`
+        select count(*)::int as n from action_ledger
+        where action_type = 'channel.verify-send' and status = 'executed'`,
+    );
+    expect(audit?.n).toBe(1);
+
+    // A retry (same identity) does not re-send — the ledger claim holds.
+    const second = await sendVerificationCode(
+      { port: memory.port, runScoped },
+      {
+        founderId: wesId,
+        channelIdentityId,
+        channelType: "imessage",
+        address: WES_PHONE,
+        code: "424242",
+      },
+    );
+    expect(second.outcome).toBe("duplicate");
+    expect(memory.sent).toHaveLength(1);
+  });
+
+  it("an unrecognized sender gets exactly one onboarding-link reply, no message stored (Ch 10)", async () => {
+    const STRANGER = "+15558880001";
+    const memory = createMemoryChannel();
+    const engine = new InMemoryWorkflowEngine();
+    const deps = { sql, engine, runScoped, port: memory.port };
+
+    await handleInbound(deps, {
+      channelType: "sms",
+      address: STRANGER,
+      body: "who is this",
+      platformMessageId: "pm-str-1",
+      timestamp: new Date(),
+    });
+    expect(memory.sent).toHaveLength(1);
+    expect(memory.sent[0]?.address).toBe(STRANGER);
+    expect(memory.sent[0]?.text).toContain("tethr");
+
+    // A second inbound from the SAME stranger → no second reply (one per address).
+    await handleInbound(deps, {
+      channelType: "sms",
+      address: STRANGER,
+      body: "hello?",
+      platformMessageId: "pm-str-2",
+      timestamp: new Date(),
+    });
+    expect(memory.sent).toHaveLength(1);
+
+    // No messages row was written for the unrecognized inbound (the load-bearing
+    // guarantee): nothing stored under a phantom founder.
+    const [stored] = await sql<{ n: number }[]>`
+      select count(*)::int as n from messages where body in ('who is this', 'hello?')`;
+    expect(stored?.n).toBe(0);
+    // The founderless audit row exists exactly once (§18.5.7 audit-before-dispatch).
+    const [sys] = await sql<{ n: number }[]>`
+      select count(*)::int as n from action_ledger
+      where action_type = ${UNRECOGNIZED_REPLY_ACTION} and founder_id is null`;
+    expect(sys?.n).toBe(1);
   });
 
   it("no send without a claimed audit row; redelivery and retry cannot double-send (§18.5.7)", async () => {

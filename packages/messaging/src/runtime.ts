@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
+import { runIrreversible } from "@tethr/core";
 import { applyCorrection, EPISODE_LOGGED_EVENT, recordObservation } from "@tethr/founder-model";
 import { sendInbound, type WorkflowEngine } from "@tethr/orchestration";
 import type { Sql } from "postgres";
+import type { ChannelPort, SendResult } from "./channel-port";
 import { type EnvelopedContent, envelopeInbound } from "./envelope";
 import { type ChannelType, resolveInbound } from "./identity";
+import { extractOtpCode, type OtpConfig, verifyChannelOtp } from "./otp";
+import { SystemActionLedger } from "./system-ledger";
 import { recordInbound } from "./thread";
 
 // The inbound half of the messaging runtime. One rule shapes it (§10.4):
@@ -15,6 +19,11 @@ import { recordInbound } from "./thread";
 
 export const INBOUND_MESSAGE_EVENT = "messaging.inbound-message";
 export const UNRECOGNIZED_INBOUND_EVENT = "messaging.unrecognized-inbound";
+/** §18.5.7 action type for the one onboarding-link reply per unknown address. */
+export const UNRECOGNIZED_REPLY_ACTION = "channel.onboarding-reply";
+/** Sent once to an unrecognized sender; overridable per environment (real link). */
+export const DEFAULT_ONBOARDING_REPLY =
+  "This number isn't linked to a tethr account yet. Start here: https://tethr.to/start";
 
 export type InboundStreamMessage = {
   channelType: ChannelType;
@@ -47,6 +56,13 @@ export type InboundDeps = {
   engine: WorkflowEngine;
   runScoped: FounderScopedRunner;
   cadenceParser?: CadenceParser;
+  /** Wired in production: enables the OTP-reply check (Ch 3) and the
+   * unrecognized-inbound reply (Ch 10). Absent in unit contexts — the inbound
+   * still resolves and drops, it just sends no code-check and no reply. */
+  port?: ChannelPort;
+  otp?: OtpConfig;
+  /** Overrides the onboarding-link reply text (real link per environment). */
+  onboardingReplyText?: string;
 };
 
 export async function handleInbound(
@@ -55,12 +71,39 @@ export async function handleInbound(
 ): Promise<void> {
   const resolved = await resolveInbound(deps.sql, message);
 
-  // §18.5.2: unverified or unknown addresses never reach a founder's
-  // context. Neither the body NOR the raw address leaves the trust boundary
-  // (event payloads transit the workflow vendor): the event carries a hash,
-  // which Build 6's onboarding linkage can re-derive from a candidate
-  // address to correlate (§18.5.6 minimization).
-  if (resolved.kind !== "founder") {
+  // A known-but-UNVERIFIED channel (Ch 3 amendment, ADR 0012): this inbound is
+  // an OTP reply. Extract the code and check it against the live challenge — a
+  // match stamps verified_at atomically in the verify_channel_otp definer. The
+  // body is NEVER stored (a pre-binding verification artifact, not a thread
+  // message) and no unrecognized event fires: this is a known channel, not an
+  // unrecognized sender. Without OTP config wired (unit contexts), it just
+  // drops — an unverified channel still reaches no founder context (§18.5.2).
+  if (resolved.kind === "unverified") {
+    if (deps.otp) {
+      const code = extractOtpCode(message.body);
+      if (code) {
+        await verifyChannelOtp(
+          deps.sql,
+          {
+            channelType: message.channelType,
+            address: message.address,
+            channelIdentityId: resolved.channelIdentityId,
+            code,
+          },
+          deps.otp,
+        );
+      }
+    }
+    return;
+  }
+
+  // An UNRECOGNIZED sender — no matching channel_identity (§18.5.2). Emit the
+  // address-hash event (observability; never the raw address or body leaves the
+  // trust boundary via a queue payload — §18.5.6) AND reply once with the
+  // onboarding link, then discard: no messages row, no phantom founder (Ch 10
+  // amendment). The raw address stays in-process for the reply — it is never
+  // put in the event, preserving the ADR 0009 minimization.
+  if (resolved.kind === "unknown") {
     await deps.engine.send({
       name: UNRECOGNIZED_INBOUND_EVENT,
       id: `unrecognized/${message.platformMessageId}`,
@@ -69,6 +112,7 @@ export async function handleInbound(
         addressHash: createHash("sha256").update(message.address).digest("hex"),
       },
     });
+    await replyToUnrecognized(deps, message);
     return;
   }
 
@@ -140,6 +184,37 @@ export async function handleInbound(
       messageId: persisted.messageId,
       episodeId: persisted.episodeId,
     },
+  });
+}
+
+/**
+ * One onboarding-link reply per unrecognized address (Ch 10 amendment). §18.5.7
+ * audit-before-dispatch and idempotency come from the system (founderless)
+ * ledger keyed on the address hash — a repeat sender or a redelivered message
+ * finds the claim taken and does not re-reply. No workflow step here, so the
+ * ledger claim is the sole double-send guard (ADR 0009's posture). A no-op when
+ * no channel port is wired (unit contexts): the event alone fired above.
+ */
+async function replyToUnrecognized(
+  deps: InboundDeps,
+  message: InboundStreamMessage,
+): Promise<void> {
+  if (!deps.port) return;
+  const port = deps.port;
+  const addressHash = createHash("sha256").update(message.address).digest("hex");
+  // outcome "duplicate" (a repeat/redelivered sender) is the intended path — the
+  // claim already replied once; runIrreversible short-circuits without a resend.
+  await runIrreversible<SendResult>({
+    actionType: UNRECOGNIZED_REPLY_ACTION,
+    idempotencyKey: `${UNRECOGNIZED_REPLY_ACTION}/${addressHash}`,
+    ledger: new SystemActionLedger(deps.sql),
+    action: (key) =>
+      port.send({
+        channelType: message.channelType,
+        address: message.address,
+        text: deps.onboardingReplyText ?? DEFAULT_ONBOARDING_REPLY,
+        idempotencyKey: key,
+      }),
   });
 }
 

@@ -1,4 +1,11 @@
 import { recordObservation } from "@tethr/founder-model";
+import {
+  type ChannelPort,
+  createVerificationChallenge,
+  type FounderScopedRunner,
+  type OtpConfig,
+  sendVerificationCode,
+} from "@tethr/messaging";
 import { sendInternal, type WorkflowEngine } from "@tethr/orchestration";
 import type { Sql } from "postgres";
 import { founderIdForAuthUser } from "./auth";
@@ -18,6 +25,14 @@ export type OnboardingDeps = {
    * tethr_app inside one transaction so creation + seeding are atomic. */
   sql: Sql;
   engine: WorkflowEngine;
+  // Channel verification (Gate 0, Ch 3 amendment). Supplied together in
+  // production: the OTP challenge row is INSERTed inside the atomic tx (so
+  // channel + challenge commit as one unit), and the code is sent post-commit.
+  // Absent in unit contexts — onboarding creates the unverified channel as
+  // before and skips the challenge/send.
+  otp?: OtpConfig;
+  port?: ChannelPort;
+  runScoped?: FounderScopedRunner;
 };
 
 export type OnboardingResult = { founderId: string };
@@ -37,6 +52,12 @@ export async function runOnboarding(
 
   const seeds = seedProfile(input);
   const company = companyStateSeed(input);
+
+  // Verification is on only when the OTP secret, a channel port, and a scoped
+  // runner are all wired (production). The challenge row lands inside the tx
+  // below; the code send happens after commit. Plaintext is captured here.
+  const otpEnabled = Boolean(deps.otp && deps.port && deps.runScoped);
+  let pendingVerification: { channelIdentityId: string; code: string } | undefined;
 
   // Founder creation and seeding are ONE transaction: creation is a service-
   // role write (the `founders` table has no insert policy — §18.5.4), so the
@@ -61,9 +82,23 @@ export async function runOnboarding(
     // founder's context, and the first outbound refuses an unverified channel).
     // The verification mechanism (OTP / proven inbound) is a handbook gap owed
     // by the entry boundary; onboarding sets verified_at once handed proof.
-    await trx`
+    const [channel] = await trx<{ id: string }[]>`
       insert into channel_identities (channel_type, address, is_primary)
-      values (${input.channel.channelType}, ${input.channel.address}, true)`;
+      values (${input.channel.channelType}, ${input.channel.address}, true)
+      returning id`;
+    const channelIdentityId = (channel as { id: string }).id;
+
+    // OTP challenge in the SAME atomic tx as the channel (Gate 0, Option A): a
+    // committed unverified channel always carries its challenge. Only the HMAC
+    // persists (§18.5.5 peppered); the plaintext code is captured for the
+    // post-commit send and never stored.
+    if (deps.otp && otpEnabled) {
+      const { code, challenge } = createVerificationChallenge(deps.otp, channelIdentityId);
+      await trx`
+        insert into channel_verifications (channel_identity_id, code_hash, expires_at)
+        values (${challenge.channelIdentityId}, ${challenge.codeHash}, ${challenge.expiresAt})`;
+      pendingVerification = { channelIdentityId, code };
+    }
 
     await trx`
       insert into company_state (company_name, stage, state)
@@ -96,11 +131,33 @@ export async function runOnboarding(
   // its own — no founder prompt. Emitted AFTER the write phase commits, so a
   // downstream handler failure can never roll back (or masquerade as) a
   // successful onboarding; an auth-linked retry resumes idempotently above.
+  // Emitted BEFORE the code send so a code-delivery failure can never swallow
+  // the Research trigger — Research is background work (it needs no verified
+  // channel), and the proactive-loop proof must not be hostage to code delivery.
   await sendInternal(deps.engine, {
     name: ONBOARDING_COMPLETED_EVENT,
     id: `onboarding/${founderId}`,
     data: { founderId, entryPath: input.path },
   });
+
+  // Post-commit: send the code to the (still unverified) channel — the one
+  // outbound sanctioned to an unverified channel, keyed on the identity so a
+  // retry cannot re-send (§18.5.7 audit-before-dispatch). Never inside the tx
+  // (no external dispatch under an open transaction); the plaintext lived only
+  // in memory and is never persisted. A send failure surfaces to the caller;
+  // the resend path is the entry-surface's job (Build 9, §3.5).
+  if (deps.otp && deps.port && deps.runScoped && pendingVerification) {
+    await sendVerificationCode(
+      { port: deps.port, runScoped: deps.runScoped },
+      {
+        founderId,
+        channelIdentityId: pendingVerification.channelIdentityId,
+        channelType: input.channel.channelType,
+        address: input.channel.address,
+        code: pendingVerification.code,
+      },
+    );
+  }
 
   return { founderId };
 }

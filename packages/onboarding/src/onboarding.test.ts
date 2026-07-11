@@ -3,8 +3,10 @@ import { migrateUp, withFounderContext } from "@tethr/db";
 import { listTraits } from "@tethr/founder-model";
 import {
   createMemoryChannel,
+  extractOtpCode,
   INITIATION_TRIGGER_EVENT,
   registerInitiation,
+  verifyChannelOtp,
 } from "@tethr/messaging";
 import { InMemoryWorkflowEngine } from "@tethr/orchestration";
 import postgres, { type Sql } from "postgres";
@@ -151,6 +153,70 @@ describe.skipIf(!adminUrl)("onboarding & seeding (requires TETHR_DATABASE_URL)",
     for (const sent of channel.sent) {
       expect(sent.text).toBe("gentle:checkin.gentle");
     }
+  });
+
+  it("wires OTP: challenge in the atomic tx, code sent to the unverified channel, verifiable (Ch 3, Gate 0)", async () => {
+    const engine = new InMemoryWorkflowEngine();
+    const channel = createMemoryChannel();
+    const secret = "onboard-pepper";
+    const OTP_ADDR = "+1005";
+    const { founderId } = await runOnboarding(
+      { sql, engine, otp: { secret }, port: channel.port, runScoped },
+      input("idea", OTP_ADDR),
+    );
+
+    // The channel is created UNVERIFIED (onboarding proves no ownership).
+    const [ch] = await runScoped(
+      founderId,
+      (trx) => trx<{ id: string; verified_at: Date | null }[]>`
+        select id, verified_at from channel_identities where address = ${OTP_ADDR}`,
+    );
+    const channelIdentityId = (ch as { id: string }).id;
+    expect(ch?.verified_at).toBeNull();
+
+    // A challenge row landed inside onboarding's atomic tx (Option A) — one per
+    // channel, committed with it.
+    const [challengeCount] = await runScoped(
+      founderId,
+      (trx) => trx<{ n: number }[]>`
+        select count(*)::int as n from channel_verifications
+        where channel_identity_id = ${channelIdentityId}`,
+    );
+    expect(challengeCount?.n).toBe(1);
+
+    // The code was sent post-commit to the still-unverified channel (the one
+    // sanctioned exception to "unverified = no outbound").
+    expect(channel.sent).toHaveLength(1);
+    const sent = channel.sent[0];
+    expect(sent?.address).toBe(OTP_ADDR);
+    const code = extractOtpCode(sent?.text ?? "");
+    expect(code).not.toBeNull();
+
+    // Round-trip: a WRONG reply does not verify; the MATCHING code does — a
+    // channel cannot be verified without a matching OTP reply (§18.5.2).
+    const wrong = await verifyChannelOtp(
+      sql,
+      {
+        channelType: "imessage",
+        address: OTP_ADDR,
+        channelIdentityId,
+        code: code === "000000" ? "000001" : "000000",
+      },
+      { secret },
+    );
+    expect(wrong.verified).toBe(false);
+    const ok = await verifyChannelOtp(
+      sql,
+      { channelType: "imessage", address: OTP_ADDR, channelIdentityId, code: code as string },
+      { secret },
+    );
+    expect(ok.verified).toBe(true);
+    const [after] = await runScoped(
+      founderId,
+      (trx) => trx<{ verified_at: Date | null }[]>`
+        select verified_at from channel_identities where id = ${channelIdentityId}`,
+    );
+    expect(after?.verified_at).not.toBeNull();
   });
 
   it("links the founder to a Supabase Auth user and resolves back by it (shell auth, §18.5.2)", async () => {

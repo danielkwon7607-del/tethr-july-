@@ -23,6 +23,22 @@ export {
 } from "./initiation";
 export { createMemoryChannel, type MemoryChannel } from "./memory-channel";
 export {
+  createVerificationChallenge,
+  extractOtpCode,
+  generateOtpCode,
+  OTP_CODE_LENGTH,
+  OTP_MAX_ATTEMPTS,
+  OTP_TTL_MS,
+  type OtpConfig,
+  otpCodeHash,
+  sendVerificationCode,
+  VERIFICATION_SEND_ACTION,
+  type VerificationChallenge,
+  type VerificationSendDeps,
+  type VerificationSendRequest,
+  verifyChannelOtp,
+} from "./otp";
+export {
   type OutboundDeps,
   type OutboundRequest,
   type SendOutcome,
@@ -37,12 +53,14 @@ export {
   type CadenceParser,
   type CadenceSignal,
   createMessagingRuntime,
+  DEFAULT_ONBOARDING_REPLY,
   type FounderScopedRunner,
   handleInbound,
   INBOUND_MESSAGE_EVENT,
   type InboundDeps,
   type InboundStreamMessage,
   UNRECOGNIZED_INBOUND_EVENT,
+  UNRECOGNIZED_REPLY_ACTION,
 } from "./runtime";
 export {
   type SpectrumApp,
@@ -50,4 +68,5 @@ export {
   spectrumChannelPort,
   spectrumInboundStream,
 } from "./spectrum-adapter";
+export { SystemActionLedger } from "./system-ledger";
 export { recordInbound, recordOutbound, type ThreadMessage, threadFor } from "./thread";
