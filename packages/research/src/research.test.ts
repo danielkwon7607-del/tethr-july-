@@ -3,7 +3,12 @@ import { InMemoryWorkflowEngine, type TierRunner } from "@tethr/orchestration";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCostGuard } from "./budget";
-import { ONBOARDING_COMPLETED_EVENT, registerResearchEntry } from "./entry";
+import {
+  ONBOARDING_COMPLETED_EVENT,
+  registerResearchEntry,
+  registerResearchPivotEntry,
+  VALIDATION_PIVOT_EVENT,
+} from "./entry";
 import { RESEARCH_COMPLETED_EVENT, RESEARCH_PAUSED_EVENT, type ResearchResult } from "./pipeline";
 import { QuotaExceededError, withCache } from "./quota";
 import {
@@ -286,6 +291,50 @@ describe.skipIf(!adminUrl)("research pipeline (requires TETHR_DATABASE_URL)", ()
         trx<{ n: number }[]>`select count(*)::int as n from research_spend where kind = 'source'`,
     );
     expect(spend?.n).toBe(1);
+  });
+
+  it("re-enters Research on a validation pivot so the loop never dead-ends (§13.3, Ch 11)", async () => {
+    const founderId = await seedFounder("idea that needs a pivot");
+    // The founder has already passed research and is in planning/validation.
+    await runScoped(founderId, (trx) => trx`update company_state set stage = 'planning'`);
+    const engine = new InMemoryWorkflowEngine();
+    const completed: string[] = [];
+    engine.register({
+      id: "test.pivot-completed",
+      trigger: { event: RESEARCH_COMPLETED_EVENT },
+      handler: async (event) => completed.push(event.data.verdict as string),
+    });
+    const results: ResearchResult[] = [];
+    registerResearchPivotEntry(engine, {
+      sources: strongSources(),
+      tierRunner: fakeTierRunner(),
+      runScoped,
+      engine,
+      onComplete: (result) => {
+        results.push(result);
+      },
+    });
+
+    // Validation emits the pivot; Research consumes it and re-researches.
+    await engine.send({
+      name: VALIDATION_PIVOT_EVENT,
+      id: `validation-pivot/${founderId}`,
+      data: { founderId, experimentId: `exp-${founderId}` },
+    });
+
+    expect(results[0]?.outcome).toBe("verdict");
+    expect(completed).toEqual(["strong_signal"]);
+    const [v] = await runScoped(
+      founderId,
+      (trx) => trx<{ n: number }[]>`select count(*)::int as n from verdicts`,
+    );
+    expect(v?.n).toBe(1);
+    // Company State ended back at planning (research advanced it after re-entry).
+    const [state] = await runScoped(
+      founderId,
+      (trx) => trx<{ stage: string }[]>`select stage from company_state`,
+    );
+    expect(state?.stage).toBe("planning");
   });
 });
 
