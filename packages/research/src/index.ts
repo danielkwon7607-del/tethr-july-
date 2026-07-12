@@ -11,8 +11,11 @@ export {
 export {
   ONBOARDING_COMPLETED_EVENT,
   RESEARCH_ENTRY_WORKFLOW_ID,
+  RESEARCH_PIVOT_WORKFLOW_ID,
   type ResearchEntryDeps,
   registerResearchEntry,
+  registerResearchPivotEntry,
+  VALIDATION_PIVOT_EVENT,
 } from "./entry";
 export { createHttpSources } from "./http-sources";
 export {

@@ -9,7 +9,12 @@ import { type ResearchPipelineDeps, type ResearchResult, runResearchPipeline } f
 // it fires on onboarding.completed, no user prompt.
 
 export const ONBOARDING_COMPLETED_EVENT = "onboarding.completed";
+// A validation pivot re-enters Research (§13.3, Ch 11). Research owns this
+// consumer seam (Constitution XII) — Validation only emits the event; it does
+// not import Research — the same shape as the onboarding→research seam.
+export const VALIDATION_PIVOT_EVENT = "validation.pivot";
 export const RESEARCH_ENTRY_WORKFLOW_ID = "research.pipeline";
+export const RESEARCH_PIVOT_WORKFLOW_ID = "research.pivot-reentry";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -56,6 +61,42 @@ export function registerResearchEntry(engine: WorkflowEngine, deps: ResearchEntr
       // surface to draw one out (Build 9). Not an error — a real cold-start state.
       if (!query) return;
 
+      const result = await runResearchPipeline(deps, { founderId, query, step });
+      await deps.onComplete?.(result, founderId);
+    },
+  });
+}
+
+/**
+ * Validation-pivot re-entry (§13.3, Ch 11): a pivot verdict from Validation
+ * routes back into Research through the internal-event intake, so the loop never
+ * dead-ends. It reshapes Company State back to `researching` and re-runs the
+ * pipeline over the founder's (pivoted) idea in Company State — the founder-facing
+ * capture of the new direction is Build 9's entry surface; here Research proves
+ * the seam by re-researching. Idempotency is the engine's event-id dedup plus the
+ * stage guard (only a founder past research re-enters).
+ */
+export function registerResearchPivotEntry(engine: WorkflowEngine, deps: ResearchEntryDeps): void {
+  engine.register({
+    id: RESEARCH_PIVOT_WORKFLOW_ID,
+    trigger: { event: VALIDATION_PIVOT_EVENT },
+    handler: async (event, step) => {
+      const founderId = event.data.founderId as string;
+      if (!founderId || !UUID_PATTERN.test(founderId)) {
+        throw new Error(`${VALIDATION_PIVOT_EVENT} requires a UUID founderId`);
+      }
+      const query = await step.run("reenter-research", () =>
+        deps.runScoped(founderId, async (trx) => {
+          await trx`
+            update company_state set stage = 'researching', updated_at = now()
+            where stage = 'planning'`;
+          const [row] = await trx<{ state: Record<string, unknown> }[]>`
+            select state from company_state`;
+          const idea = row ? extractIdea(row.state) : null;
+          return idea ? { idea } : null;
+        }),
+      );
+      if (!query) return;
       const result = await runResearchPipeline(deps, { founderId, query, step });
       await deps.onComplete?.(result, founderId);
     },
