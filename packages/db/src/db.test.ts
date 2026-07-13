@@ -35,7 +35,10 @@ const FOUNDER_SCOPED_TABLES = [
 // §18.5.4: a table is founder-scoped by default; opting out is enumerated.
 // rag_corpus is Public Knowledge (Ch 7): shared, founder-free, read-only —
 // deliberately the opposite of every founder-scoped table (no RLS, no writes).
-const RLS_EXCEPTIONS = ["rag_corpus", "schema_migrations"] as const;
+// onboarding_sessions (Build 9a, ADR 0015) is PRE-founder: an in-progress
+// onboarding draft has no founder yet, so it cannot be founder-scoped; it is
+// keyed by an opaque token and reached only by the service-role entry package.
+const RLS_EXCEPTIONS = ["rag_corpus", "schema_migrations", "onboarding_sessions"] as const;
 
 const embedding = (hot: number) =>
   JSON.stringify(Array.from({ length: 1536 }, (_, i) => (i === hot ? 1 : 0)));

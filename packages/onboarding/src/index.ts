@@ -1,8 +1,9 @@
-export { founderIdForAuthUser } from "./auth";
+export { founderIdForAuthUser, founderIdForOnboardingSession } from "./auth";
 export {
   type CompanyStateSeed,
   companyStateSeed,
   type EntryPath,
+  type NarrativeSeeds,
   type OnboardingInput,
   type SelfReport,
   seedProfile,

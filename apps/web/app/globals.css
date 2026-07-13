@@ -253,3 +253,171 @@ table.traits td {
   color: var(--color-muted);
   margin-top: var(--space-2);
 }
+
+/* Entry surface (§3.6) — the conversational onboarding. */
+.onb {
+  max-width: 34rem;
+}
+
+.onb-interstitial {
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  letter-spacing: 0.01em;
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: var(--space-2);
+  border-left: 2px solid color-mix(in oklch, var(--color-accent) 45%, transparent);
+}
+
+.onb-error {
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0;
+}
+
+.onb-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.onb-panel {
+  margin-top: var(--space-3);
+}
+
+.onb-prompt {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-3);
+}
+
+.onb-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.onb-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  width: 100%;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 100ms ease;
+}
+
+.onb-option:hover:not(:disabled),
+.onb-option:focus-visible:not(:disabled) {
+  border-color: var(--color-accent);
+  background: color-mix(in oklch, var(--color-accent) 7%, var(--color-panel));
+  outline: none;
+}
+
+.onb-option:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.onb-option.selected {
+  border-color: var(--color-accent);
+  background: color-mix(in oklch, var(--color-accent) 12%, var(--color-panel));
+}
+
+.onb-option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.onb-option-label {
+  font-weight: 600;
+}
+
+.onb-option-sub {
+  color: var(--color-muted);
+  font-size: var(--text-sm);
+}
+
+.onb-freetext,
+.onb-phone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.onb-phone {
+  margin-top: var(--space-1);
+}
+
+.onb textarea,
+.onb input[type="tel"] {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--color-ink);
+  resize: vertical;
+}
+
+.onb textarea:focus,
+.onb input[type="tel"]:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.onb-primary {
+  align-self: flex-start;
+  display: inline-block;
+  background: var(--color-accent);
+  color: oklch(98% 0.01 45);
+  border: none;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    filter 150ms ease,
+    transform 100ms ease;
+}
+
+.onb-primary:hover:not(:disabled),
+.onb-primary:focus-visible:not(:disabled) {
+  filter: brightness(1.06);
+  outline: none;
+}
+
+.onb-primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.onb-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.onb-done h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  margin-bottom: var(--space-2);
+}
+
+.onb-done p {
+  margin-bottom: var(--space-2);
+}

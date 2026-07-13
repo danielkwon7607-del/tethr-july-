@@ -81,6 +81,11 @@ export type VerificationSendRequest = {
   channelType: ChannelType;
   address: string;
   code: string;
+  /** Distinguishes a re-challenge (ADR 0012 §9) from the initial send. Absent
+   * for onboarding's one send (keyed on the identity, so a retry cannot
+   * re-send). A resend passes the new challenge id, so each fresh code is its
+   * own irreversible action while a double-tap of the same resend still dedups. */
+  idempotencySuffix?: string;
 };
 
 /**
@@ -96,7 +101,10 @@ export function sendVerificationCode(
   deps: VerificationSendDeps,
   request: VerificationSendRequest,
 ): Promise<IrreversibleResult<SendResult>> {
-  const { founderId, channelIdentityId, channelType, address, code } = request;
+  const { founderId, channelIdentityId, channelType, address, code, idempotencySuffix } = request;
+  const idempotencyKey = idempotencySuffix
+    ? `${VERIFICATION_SEND_ACTION}/${channelIdentityId}/${idempotencySuffix}`
+    : `${VERIFICATION_SEND_ACTION}/${channelIdentityId}`;
   const ledger: ActionLedger = deps.ledger ?? {
     claimIntent: (actionType, key) =>
       deps.runScoped(founderId, (trx) => new PgActionLedger(trx).claimIntent(actionType, key)),
@@ -109,7 +117,7 @@ export function sendVerificationCode(
 
   return runIrreversible<SendResult>({
     actionType: VERIFICATION_SEND_ACTION,
-    idempotencyKey: `${VERIFICATION_SEND_ACTION}/${channelIdentityId}`,
+    idempotencyKey,
     ledger,
     action: (key) =>
       deps.port.send({
