@@ -34,11 +34,27 @@ export type OnboardingInput = {
   path: EntryPath;
   /** The founder's own channel. Created UNVERIFIED (§18.5.2): onboarding proves
    * no address ownership, so verified_at is set only once the entry boundary's
-   * verification step (OTP / proven inbound) hands over proof — see ADR 0011. */
-  channel: { channelType: ChannelType; address: string };
+   * verification step (OTP / proven inbound) hands over proof — see ADR 0011.
+   * OPTIONAL (Build 9a): a founder who chose "Do not reach out" (or "Email
+   * only", which the substrate has no channel type for — §10.2) onboards with
+   * NO messaging channel; the model still seeds and Research still fires, but no
+   * channel is created and no OTP is sent (ADR 0015). */
+  channel?: { channelType: ChannelType; address: string };
   /** Supabase Auth user id (§18.5.2) — links the founder to their session so
    * the shell resolves founder from the JWT claim instead of a dev binding. */
   authUserId?: string;
+  /** The entry-surface onboarding session this founder was created from (ADR
+   * 0015 §7). Stored on the founder and checked on retry so a double-submitted
+   * completion — or a retry after the post-commit OTP send failed — returns the
+   * existing founder instead of creating a second, WITHOUT needing auth. */
+  onboardingSessionId?: string;
+  /** The path the founder ORIGINALLY entered on, when it differs from `path`.
+   * A Path C founder (no idea) who picks a synthesized candidate is routed into
+   * A/B, but arriving via C is itself a process-sophistication signal (§3.2)
+   * that must not be lost in the re-route — so seedProfile starts their
+   * process read below the native A/B default (ADR 0015). Set to "none" for a
+   * Path-C origin; unset for native A/B founders. */
+  originPath?: EntryPath;
   displayName?: string;
   companyName?: string;
   /** Idea path: recorded as a hypothesis, never a settled fact (§3.2). */
@@ -47,7 +63,29 @@ export type OnboardingInput = {
   problemText?: string;
   /** None path: a direction surfaced with the founder, not invented (§3.2). */
   surfacedDirection?: string;
+  /** Path A2 (already building): what exists, who uses it, the response, the
+   * blocker. Free-text build context, not a hypothesis to stress-test. */
+  buildingContext?: string;
+  /**
+   * Free-text narrative the question set draws out (origin story, feared
+   * outcome, one-year regret, stated builder-self). NOT trait estimates — raw
+   * material for §6.7 stated-vs-revealed reconciliation later. Persisted into
+   * the onboarding episode with the same provenance discipline as every seed
+   * (§6.4), never discarded after the conversation (ADR 0015 §6).
+   */
+  narrativeSeeds?: NarrativeSeeds;
   selfReport?: SelfReport;
+};
+
+/** Stated self-descriptions the founder gives during onboarding; §6.7 later
+ * reconciles these against revealed behavior. All optional (a founder may skip
+ * a free-text prompt), and each is kept verbatim — this is the "stated" side of
+ * the divergence that is itself a primary signal (§6.7). */
+export type NarrativeSeeds = {
+  originStory?: string;
+  fearedOutcome?: string;
+  oneYearRegret?: string;
+  statedBuilderSelf?: string;
 };
 
 export type TraitSeed = { family: TraitFamily; dimension: string; estimate: number };
@@ -85,6 +123,16 @@ export function seedProfile(input: OnboardingInput): TraitSeed[] {
       ? NEUTRAL
       : clamp01(1 - report.customerContactComfort);
 
+  // §3.2: the path is a process-sophistication signal. A founder routed into A/B
+  // FROM Path C (arrived with no idea) is less process-sophisticated than one who
+  // walked in with an idea/direction, so their read starts between the resolved
+  // path's prior and the "none" prior — the C-origin signal is not lost in the
+  // re-route (ADR 0015). Native A/B founders are unaffected (originPath unset).
+  const processSophistication =
+    input.originPath === "none" && input.path !== "none"
+      ? (PROCESS_BY_PATH[input.path] + PROCESS_BY_PATH.none) / 2
+      : PROCESS_BY_PATH[input.path];
+
   return [
     { family: "capacity", dimension: "available_time", estimate: availableTime },
     { family: "capacity", dimension: "working_rhythm", estimate: workingRhythm },
@@ -111,7 +159,7 @@ export function seedProfile(input: OnboardingInput): TraitSeed[] {
     {
       family: "skill_sophistication",
       dimension: "process_sophistication",
-      estimate: PROCESS_BY_PATH[input.path],
+      estimate: processSophistication,
     },
   ];
 }

@@ -8,7 +8,7 @@ import {
 } from "@tethr/messaging";
 import { sendInternal, type WorkflowEngine } from "@tethr/orchestration";
 import type { Sql } from "postgres";
-import { founderIdForAuthUser } from "./auth";
+import { founderIdForAuthUser, founderIdForOnboardingSession } from "./auth";
 import { companyStateSeed, type OnboardingInput, seedProfile } from "./entry-paths";
 import { ONBOARDING_COMPLETED_EVENT } from "./events";
 
@@ -35,19 +35,31 @@ export type OnboardingDeps = {
   runScoped?: FounderScopedRunner;
 };
 
-export type OnboardingResult = { founderId: string };
+export type OnboardingResult = {
+  founderId: string;
+  /** False when the OTP code send failed (or no channel/OTP was configured):
+   * the founder + model are committed, but the entry surface must drive a
+   * resend before the channel can verify (§3.5, ADR 0015 §7). */
+  verificationSent: boolean;
+};
 
 export async function runOnboarding(
   deps: OnboardingDeps,
   input: OnboardingInput,
 ): Promise<OnboardingResult> {
-  // Idempotent resume: an auth-linked retry (the natural response to a thrown
-  // error, or a redelivered request) returns the existing founder instead of
-  // colliding on the unique auth_user_id. Onboarding for a given identity runs
-  // once; a second call is a no-op that re-emits nothing.
+  // Idempotent resume: a retry (the natural response to a thrown error or a
+  // redelivered request) returns the existing founder instead of creating a
+  // second. Keyed on auth_user_id when present, else the onboarding session
+  // (ADR 0015 §7) so the entry surface is idempotent WITHOUT auth. A resolved
+  // retry re-emits nothing; verificationSent is reported false so the caller
+  // falls through to its resend path rather than assuming a fresh code went out.
   if (input.authUserId) {
     const existing = await founderIdForAuthUser(deps.sql, input.authUserId);
-    if (existing) return { founderId: existing };
+    if (existing) return { founderId: existing, verificationSent: false };
+  }
+  if (input.onboardingSessionId) {
+    const existing = await founderIdForOnboardingSession(deps.sql, input.onboardingSessionId);
+    if (existing) return { founderId: existing, verificationSent: false };
   }
 
   const seeds = seedProfile(input);
@@ -67,8 +79,9 @@ export async function runOnboarding(
   // failure. (This is why we don't reuse runScoped, which switches role first.)
   const founderId = await deps.sql.begin(async (tx) => {
     const [created] = await tx<{ id: string }[]>`
-      insert into founders (display_name, auth_user_id)
-      values (${input.displayName ?? null}, ${input.authUserId ?? null})
+      insert into founders (display_name, auth_user_id, onboarding_session_id)
+      values (${input.displayName ?? null}, ${input.authUserId ?? null},
+              ${input.onboardingSessionId ?? null})
       returning id`;
     const id = (created as { id: string }).id;
 
@@ -82,22 +95,26 @@ export async function runOnboarding(
     // founder's context, and the first outbound refuses an unverified channel).
     // The verification mechanism (OTP / proven inbound) is a handbook gap owed
     // by the entry boundary; onboarding sets verified_at once handed proof.
-    const [channel] = await trx<{ id: string }[]>`
-      insert into channel_identities (channel_type, address, is_primary)
-      values (${input.channel.channelType}, ${input.channel.address}, true)
-      returning id`;
-    const channelIdentityId = (channel as { id: string }).id;
+    // Skipped entirely when the founder chose no reachable channel ("Do not
+    // reach out" / "Email only" — Build 9a): the model still seeds below.
+    if (input.channel) {
+      const [channel] = await trx<{ id: string }[]>`
+        insert into channel_identities (channel_type, address, is_primary)
+        values (${input.channel.channelType}, ${input.channel.address}, true)
+        returning id`;
+      const channelIdentityId = (channel as { id: string }).id;
 
-    // OTP challenge in the SAME atomic tx as the channel (Gate 0, Option A): a
-    // committed unverified channel always carries its challenge. Only the HMAC
-    // persists (§18.5.5 peppered); the plaintext code is captured for the
-    // post-commit send and never stored.
-    if (deps.otp && otpEnabled) {
-      const { code, challenge } = createVerificationChallenge(deps.otp, channelIdentityId);
-      await trx`
-        insert into channel_verifications (channel_identity_id, code_hash, expires_at)
-        values (${challenge.channelIdentityId}, ${challenge.codeHash}, ${challenge.expiresAt})`;
-      pendingVerification = { channelIdentityId, code };
+      // OTP challenge in the SAME atomic tx as the channel (Gate 0, Option A): a
+      // committed unverified channel always carries its challenge. Only the HMAC
+      // persists (§18.5.5 peppered); the plaintext code is captured for the
+      // post-commit send and never stored.
+      if (deps.otp && otpEnabled) {
+        const { code, challenge } = createVerificationChallenge(deps.otp, channelIdentityId);
+        await trx`
+          insert into channel_verifications (channel_identity_id, code_hash, expires_at)
+          values (${challenge.channelIdentityId}, ${challenge.codeHash}, ${challenge.expiresAt})`;
+        pendingVerification = { channelIdentityId, code };
+      }
     }
 
     await trx`
@@ -106,9 +123,21 @@ export async function runOnboarding(
 
     // The onboarding episode is the first ground-truth (§6.2); every seed
     // traces to it (provenance, §6.4), so the reads are auditable from day one.
+    // narrativeSeeds/buildingContext are the founder's verbatim self-descriptions
+    // (origin story, fears, one-year regret, builder-self) — NOT trait estimates
+    // but the raw "stated" material §6.7 reconciles against revealed behavior
+    // later (ADR 0015 §6). They live in the episode content so they carry this
+    // episode's id as provenance, exactly like every seed, and are never dropped.
+    const hasSeeds =
+      input.narrativeSeeds !== undefined && Object.keys(input.narrativeSeeds).length > 0;
+    const episodeContent = {
+      entryPath: input.path,
+      ...(hasSeeds ? { narrativeSeeds: input.narrativeSeeds } : {}),
+      ...(input.buildingContext ? { buildingContext: input.buildingContext } : {}),
+    };
     const [row] = await trx<{ id: string }[]>`
       insert into episodes (kind, content, occurred_at)
-      values ('onboarding', ${trx.json({ entryPath: input.path })}, now())
+      values ('onboarding', ${trx.json(episodeContent)}, now())
       returning id`;
     const episodeId = (row as { id: string }).id;
 
@@ -144,20 +173,28 @@ export async function runOnboarding(
   // outbound sanctioned to an unverified channel, keyed on the identity so a
   // retry cannot re-send (§18.5.7 audit-before-dispatch). Never inside the tx
   // (no external dispatch under an open transaction); the plaintext lived only
-  // in memory and is never persisted. A send failure surfaces to the caller;
-  // the resend path is the entry-surface's job (Build 9, §3.5).
-  if (deps.otp && deps.port && deps.runScoped && pendingVerification) {
-    await sendVerificationCode(
-      { port: deps.port, runScoped: deps.runScoped },
-      {
-        founderId,
-        channelIdentityId: pendingVerification.channelIdentityId,
-        channelType: input.channel.channelType,
-        address: input.channel.address,
-        code: pendingVerification.code,
-      },
-    );
+  // in memory and is never persisted. A send failure is CAUGHT and reported as
+  // verificationSent=false, not thrown: the founder + model already committed,
+  // so a throw here would orphan them and a naive retry would double-create.
+  // The entry surface owns the resend path (§3.5, ADR 0015 §7).
+  let verificationSent = false;
+  if (input.channel && deps.otp && deps.port && deps.runScoped && pendingVerification) {
+    try {
+      await sendVerificationCode(
+        { port: deps.port, runScoped: deps.runScoped },
+        {
+          founderId,
+          channelIdentityId: pendingVerification.channelIdentityId,
+          channelType: input.channel.channelType,
+          address: input.channel.address,
+          code: pendingVerification.code,
+        },
+      );
+      verificationSent = true;
+    } catch {
+      verificationSent = false;
+    }
   }
 
-  return { founderId };
+  return { founderId, verificationSent };
 }

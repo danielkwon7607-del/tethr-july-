@@ -13,3 +13,16 @@ export async function founderIdForAuthUser(sql: Sql, authUserId: string): Promis
     where auth_user_id = ${authUserId} and tombstoned_at is null`;
   return row?.id ?? null;
 }
+
+/** Idempotency lookup for the entry surface (ADR 0015 §7): the founder created
+ * from a given onboarding session, if any. Lets completion be idempotent
+ * without auth — a retry resolves to the same founder. */
+export async function founderIdForOnboardingSession(
+  sql: Sql,
+  onboardingSessionId: string,
+): Promise<string | null> {
+  const [row] = await sql<{ id: string }[]>`
+    select id from founders
+    where onboarding_session_id = ${onboardingSessionId} and tombstoned_at is null`;
+  return row?.id ?? null;
+}

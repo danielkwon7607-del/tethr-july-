@@ -53,6 +53,26 @@ describe("cold-start seed profile (§3.3, §6.13)", () => {
     expect(proc("problem")).toBeLessThan(proc("idea"));
   });
 
+  it("a Path-C origin lowers ONLY process_sophistication vs a native Path A founder (§3.2, ADR 0015)", () => {
+    const nativeIdea = seedProfile(base("idea"));
+    // Identical input except the Path-C origin marker — all else equal.
+    const fromPathC = seedProfile({ ...base("idea"), originPath: "none" });
+    const proc = (seeds: ReturnType<typeof seedProfile>) =>
+      seeds.find((s) => s.dimension === "process_sophistication")?.estimate ?? 0;
+
+    // C-origin starts below the native idea default, but above the raw "none"
+    // prior — they arrived with nothing yet now hold an idea.
+    expect(proc(fromPathC)).toBeLessThan(proc(nativeIdea));
+    expect(proc(fromPathC)).toBeGreaterThan(0.2);
+
+    // Every OTHER dimension is byte-for-byte identical — the marker touches one.
+    for (const seed of fromPathC) {
+      if (seed.dimension === "process_sophistication") continue;
+      const native = nativeIdea.find((s) => s.dimension === seed.dimension);
+      expect(native?.estimate).toBe(seed.estimate);
+    }
+  });
+
   it("self-reported signals override the neutral defaults", () => {
     const withReport: OnboardingInput = {
       ...base("idea"),
